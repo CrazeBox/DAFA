@@ -99,7 +99,7 @@ class LocalTrainer:
         
         self.num_steps = 0
         
-        self.scaler = torch.cuda.amp.GradScaler(enabled=config.use_amp)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=config.use_amp)
     
     def train(
         self,
@@ -132,7 +132,7 @@ class LocalTrainer:
                 epoch_range,
                 desc=f"  Client {self.client_id}",
                 leave=False,
-                ncols=80,
+                dynamic_ncols=True,
             )
         
         for epoch in epoch_range:
@@ -381,7 +381,7 @@ class FederatedTrainer:
                 client_ids,
                 desc="Training clients",
                 leave=False,
-                ncols=100,
+                dynamic_ncols=True,
             )
         else:
             client_pbar = client_ids
@@ -514,7 +514,7 @@ class FederatedTrainer:
             self.test_loader,
             desc="Evaluating",
             leave=False,
-            ncols=100,
+            dynamic_ncols=True,
         )
         
         with torch.no_grad():
