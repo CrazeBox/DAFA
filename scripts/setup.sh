@@ -35,7 +35,10 @@ if command -v nvidia-smi &> /dev/null; then
     CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}' | head -1)
     echo "      Detected CUDA $CUDA_VERSION"
     
-    if [[ "$CUDA_VERSION" =~ ^12 ]]; then
+    if [[ "$CUDA_VERSION" =~ ^13 ]]; then
+        echo "      Installing PyTorch for CUDA 12.x (compatible with CUDA 13.x)..."
+        pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 -q
+    elif [[ "$CUDA_VERSION" =~ ^12 ]]; then
         echo "      Installing PyTorch for CUDA 12.x..."
         pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121 -q
     elif [[ "$CUDA_VERSION" =~ ^11 ]]; then
