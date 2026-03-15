@@ -1,0 +1,17 @@
+method: "fednova"
+description: "Federated Normalized Averaging (Wang et al., 2020)"
+
+hyperparameters:
+  local_lr:
+    type: "choice"
+    values: [0.1, 0.01, 0.001]
+
+aggregation:
+  type: "normalized_average"
+  use_data_size_weighting: false
+
+local_training:
+  optimizer: "sgd"
+  momentum: 0.9
+  weight_decay: 0.0001
+  normalize_updates: true

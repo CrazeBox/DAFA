@@ -1,0 +1,23 @@
+method: "fedadam"
+description: "Federated Adam (Reddi et al., 2020)"
+
+hyperparameters:
+  local_lr:
+    type: "choice"
+    values: [0.1, 0.01, 0.001]
+  server_lr:
+    type: "choice"
+    values: [0.01, 0.1, 0.3]
+
+aggregation:
+  type: "adaptive"
+  use_data_size_weighting: true
+  server_optimizer: "adam"
+  server_beta1: 0.9
+  server_beta2: 0.999
+  server_epsilon: 1e-8
+
+local_training:
+  optimizer: "sgd"
+  momentum: 0.9
+  weight_decay: 0.0001

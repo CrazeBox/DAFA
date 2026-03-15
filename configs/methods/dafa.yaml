@@ -1,0 +1,57 @@
+method: "dafa"
+description: "Directionally Aligned Federated Aggregation"
+
+hyperparameters:
+  local_lr:
+    type: "choice"
+    values: [0.1, 0.01, 0.001]
+  gamma:
+    type: "fixed"
+    value: 1.0
+  beta:
+    type: "fixed"
+    value: 0.9
+  mu:
+    type: "fixed"
+    value: 0.01
+  use_pi_weighting:
+    type: "choice"
+    values: [true, false]
+  server_lr:
+    type: "fixed"
+    value: 1.0
+
+aggregation:
+  type: "direction_aligned"
+  use_data_size_weighting: "${use_pi_weighting}"
+  temperature: "${gamma}"
+  momentum: "${beta}"
+  threshold: "${mu}"
+
+local_training:
+  optimizer: "sgd"
+  momentum: 0.9
+  weight_decay: 0.0001
+
+proxy:
+  type: "momentum"
+  beta: "${beta}"
+
+description_full: |
+  DAFA: Directionally Aligned Federated Aggregation
+  
+  Key algorithm steps:
+  1. Compute FedAvg update: Δ_FedAvg = Σ p_i * Δ_i / Σ p_i
+  2. Update momentum proxy: m_t = (1-β) * Δ_FedAvg + β * m_{t-1}
+  3. Compute proxy direction: v* = m_t / ||m_t||
+  4. For each client i:
+     - If ||Δ_i|| >= μ: s_i = <Δ_i/||Δ_i||, v*>
+     - Else: s_i = 0 (graceful degradation)
+  5. Compute weights: w_i = p_i * exp(γ * s_i) / Σ p_j * exp(γ * s_j)
+  6. Aggregate: Δ_DAFA = Σ w_i * Δ_i
+  
+  Parameters:
+  - gamma (γ): Temperature for softmax weighting. Higher = stronger alignment preference.
+  - beta (β): Momentum coefficient. Higher = more temporal smoothing.
+  - mu (μ): Norm threshold for graceful degradation.
+  - use_pi_weighting: Whether to include data size weighting p_i.

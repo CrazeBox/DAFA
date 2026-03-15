@@ -1,0 +1,20 @@
+method: "scaffold"
+description: "SCAFFOLD: Stochastic Controlled Averaging (Karimireddy et al., 2020)"
+
+hyperparameters:
+  local_lr:
+    type: "choice"
+    values: [0.1, 0.01, 0.001]
+  global_lr:
+    type: "choice"
+    values: [0.5, 1.0, 2.0]
+
+aggregation:
+  type: "scaffold"
+  use_data_size_weighting: true
+
+local_training:
+  optimizer: "sgd"
+  momentum: 0.9
+  weight_decay: 0.0001
+  use_control_variate: true

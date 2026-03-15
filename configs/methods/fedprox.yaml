@@ -1,0 +1,20 @@
+method: "fedprox"
+description: "Federated Proximal (Li et al., 2020)"
+
+hyperparameters:
+  local_lr:
+    type: "choice"
+    values: [0.1, 0.01, 0.001]
+  mu:
+    type: "choice"
+    values: [0.001, 0.01, 0.1]
+
+aggregation:
+  type: "weighted_average"
+  use_data_size_weighting: true
+
+local_training:
+  optimizer: "sgd"
+  momentum: 0.9
+  weight_decay: 0.0001
+  proximal_term: true

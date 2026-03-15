@@ -1,0 +1,50 @@
+# ==============================================================================
+# DAFA联邦学习实验 - systemd服务配置文件
+# ==============================================================================
+# 安装方法:
+#   sudo cp dafa-experiment.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable dafa-experiment
+#   sudo systemctl start dafa-experiment
+#
+# 管理命令:
+#   sudo systemctl status dafa-experiment   # 查看状态
+#   sudo systemctl stop dafa-experiment     # 停止服务
+#   sudo systemctl restart dafa-experiment  # 重启服务
+#   sudo journalctl -u dafa-experiment -f   # 查看日志
+# ==============================================================================
+
+[Unit]
+Description=DAFA Federated Learning Experiment Service
+Documentation=https://github.com/yourname/dafa
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+Group=your_username
+WorkingDirectory=/path/to/DAFA
+
+# 环境变量
+Environment="PATH=/path/to/DAFA/venv/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="CUDA_VISIBLE_DEVICES=0"
+
+# 启动命令
+ExecStart=/path/to/DAFA/venv/bin/python /path/to/DAFA/scripts/run_all_experiments.py --experiment all
+
+# 重启策略
+Restart=on-failure
+RestartSec=10
+
+# 资源限制
+LimitNOFILE=65536
+MemoryMax=32G
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dafa-experiment
+
+[Install]
+WantedBy=multi-user.target

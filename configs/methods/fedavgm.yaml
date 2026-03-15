@@ -1,0 +1,21 @@
+method: "fedavgm"
+description: "FedAvg with Server Momentum (Hsu et al., 2019)"
+
+hyperparameters:
+  local_lr:
+    type: "choice"
+    values: [0.1, 0.01, 0.001]
+  server_momentum:
+    type: "choice"
+    values: [0.5, 0.7, 0.9, 0.99]
+
+aggregation:
+  type: "weighted_average"
+  use_data_size_weighting: true
+  server_optimizer: "sgd"
+  server_momentum: 0.9
+
+local_training:
+  optimizer: "sgd"
+  momentum: 0.9
+  weight_decay: 0.0001

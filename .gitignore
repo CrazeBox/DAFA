@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (large files)
+data/cifar10/cifar-10-*
+data/femnist/femnist_*
+data/shakespeare/shakespeare_*
+*.tar.gz
+*.zip
+
+# Results (uncomment to track)
+results/
+checkpoints/
+logs/
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+
+# Logs
+*.log
+
+# System
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# Temporary
+tmp/
+*.tmp
+*.bak
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/

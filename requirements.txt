@@ -1,0 +1,29 @@
+# DAFA Dependencies
+# Python 3.8+ required
+
+# Core
+numpy>=1.21.0
+scipy>=1.7.0
+Pillow>=9.0.0
+
+# Config
+pyyaml>=6.0
+omegaconf>=2.3.0
+
+# Visualization
+matplotlib>=3.5.0
+seaborn>=0.12.0
+
+# CLI & Logging
+tqdm>=4.64.0
+colorlog>=6.6.0
+colorama>=0.4.6
+click>=8.0.0
+
+# Testing
+pytest>=7.0.0
+
+# PyTorch (install based on your CUDA version)
+# CUDA 11.8: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# CUDA 12.1: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# CPU:       pip install torch torchvision
