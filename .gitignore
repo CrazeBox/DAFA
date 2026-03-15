@@ -43,7 +43,7 @@ data/shakespeare/shakespeare_*
 *.tar.gz
 *.zip
 
-# Results (uncomment to track)
+# Results
 results/
 checkpoints/
 logs/
@@ -72,3 +72,8 @@ tmp/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Private files (not for public repo)
+NeurlPS_Paper4.pdf
+论文评审.txt
+EXPERIMENT_DESIGN.md
