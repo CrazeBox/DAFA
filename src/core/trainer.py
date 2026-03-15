@@ -16,6 +16,7 @@ from tqdm import tqdm
 from ..methods.base import ClientUpdate
 from ..utils.checkpoint import CheckpointManager
 from ..utils.logger import get_logger
+from ..utils.printing import print_header, print_line, print_summary
 from ..utils.metrics import compute_accuracy, compute_perplexity
 from ..analysis.analyzer import ExperimentAnalyzer, DSNRAnalyzer
 
@@ -274,17 +275,7 @@ class FederatedTrainer:
         logger.info(f"Number of clients: {len(self.client_loaders)}")
         logger.info(f"Clients per round: {self.config.num_clients_per_round}")
         
-        use_monitor = self.monitor is not None
-        
-        if use_monitor:
-            self.monitor.start()
-        else:
-            pbar = tqdm(
-                total=self.config.num_rounds,
-                desc="Training",
-                ncols=100,
-                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-            )
+        print_header()
         
         try:
             while self.current_round < self.config.num_rounds:
@@ -293,9 +284,6 @@ class FederatedTrainer:
                 round_start = time.time()
                 
                 selected_clients = self._select_clients()
-                
-                if use_monitor and self.monitor_wrapper:
-                    self.monitor_wrapper.on_round_start(self.current_round, selected_clients)
                 
                 client_updates = self._train_clients(selected_clients)
                 
@@ -319,21 +307,18 @@ class FederatedTrainer:
                 
                 self.history.append(metrics)
                 
-                if use_monitor and self.monitor_wrapper:
-                    self.monitor_wrapper.on_round_complete(
-                        round_num=self.current_round,
-                        accuracy=metrics["accuracy"],
-                        loss=metrics["loss"],
-                        dsnr=metrics.get("dsnr"),
-                        variance=metrics.get("update_variance"),
-                    )
-                    self.monitor_wrapper.update_gpu_info()
-                else:
-                    pbar.set_postfix({
-                        "acc": f"{metrics['accuracy']:.4f}",
-                        "loss": f"{metrics['loss']:.4f}",
-                        "dsnr": f"{metrics.get('dsnr', 0):.2f}" if metrics.get('dsnr') else "N/A",
-                    })
+                print_line(
+                    round_num=self.current_round,
+                    total_rounds=self.config.num_rounds,
+                    is_train=True,
+                    num_clients=len(selected_clients),
+                    loss=metrics["loss"],
+                    accuracy=metrics["accuracy"],
+                    dsnr=metrics.get("dsnr"),
+                    round_time=round_time,
+                    total_time=metrics["total_time"],
+                    persistent=(self.current_round % self.config.eval_every == 0),
+                )
                 
                 if metrics["accuracy"] > self.best_accuracy:
                     self.best_accuracy = metrics["accuracy"]
@@ -342,19 +327,10 @@ class FederatedTrainer:
                 
                 if self.current_round % self.config.save_every == 0:
                     self._save_checkpoint()
-                
-                if not use_monitor:
-                    pbar.update(1)
         
         except KeyboardInterrupt:
             logger.info("Training interrupted. Saving checkpoint...")
             self._save_checkpoint()
-        
-        finally:
-            if use_monitor:
-                self.monitor.stop()
-            else:
-                pbar.close()
         
         return self._get_results()
     
