@@ -108,7 +108,10 @@ class DSNRAnalyzer:
         if momentum is None:
             return 0.0
         
-        signal = torch.dot(aggregated_update, momentum).item() ** 2
+        agg_device = aggregated_update.device
+        momentum_device = momentum.device if momentum.device == agg_device else momentum.to(agg_device)
+        
+        signal = torch.dot(aggregated_update, momentum_device).item() ** 2
         
         deviations = [u - aggregated_update for u in updates]
         noise = sum(d.norm().item() ** 2 for d in deviations) / len(deviations)

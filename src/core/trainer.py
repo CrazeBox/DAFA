@@ -53,7 +53,7 @@ class TrainerConfig:
     track_convergence_speed: bool = True
     convergence_threshold: float = 0.8
     
-    use_monitor: bool = True
+    use_monitor: bool = False
     monitor_refresh_rate: float = 0.5
     
     use_amp: bool = True
@@ -573,6 +573,11 @@ class FederatedTrainer:
         
         updates = [u.update for u in client_updates]
         
+        if not updates:
+            return {}
+        
+        device = self.device
+        updates = [u.to(device) if u.device != device else u for u in updates]
         aggregated_update = torch.stack(updates).mean(dim=0)
         
         dsnr = self.dsnr_analyzer.compute_dsnr(updates, aggregated_update)
@@ -580,6 +585,8 @@ class FederatedTrainer:
         momentum = getattr(self.aggregator, "momentum", None)
         decentralized_dsnr = 0.0
         if momentum is not None:
+            if momentum.device != device:
+                momentum = momentum.to(device)
             decentralized_dsnr = self.dsnr_analyzer.compute_decentralized_dsnr(
                 updates, aggregated_update, momentum
             )
