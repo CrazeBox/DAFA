@@ -178,11 +178,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 def get_default_data_dir() -> Path:
     """Get default data directory based on platform."""
-    if IS_LINUX:
-        data_home = os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
-        return Path(data_home) / "dafa" / "data"
-    else:
-        return PROJECT_ROOT / "data"
+    return PROJECT_ROOT / "data"
 
 
 def get_dataset(args: argparse.Namespace) -> tuple:
