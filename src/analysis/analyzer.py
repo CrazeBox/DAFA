@@ -118,6 +118,79 @@ class DSNRAnalyzer:
         
         return signal / (noise + 1e-10)
     
+    def compute_decentralized_dsnr_streaming(
+        self,
+        updates_iterator,
+        aggregated_update: torch.Tensor,
+        momentum: torch.Tensor,
+    ) -> float:
+        """
+        Compute decentralized DSNR using streaming computation (OOM-safe).
+        
+        This method avoids OOM by processing updates one at a time and
+        immediately releasing memory after computing the deviation norm.
+        
+        Uses the formula: noise = (1/N) * Σ||Δ_i||² - ||Δ_agg||²
+        
+        Args:
+            updates_iterator: Iterator yielding client update tensors
+            aggregated_update: Aggregated update
+            momentum: Server momentum vector m_t
+        
+        Returns:
+            Decentralized DSNR value
+        """
+        if momentum is None:
+            return 0.0
+        
+        agg_device = aggregated_update.device
+        momentum_tensor = momentum if momentum.device == agg_device else momentum.to(agg_device)
+        
+        signal = torch.dot(aggregated_update, momentum_tensor).item() ** 2
+        
+        sum_norm_sq = 0.0
+        count = 0
+        
+        agg_norm_sq = aggregated_update.norm().item() ** 2
+        agg_dot_sum = 0.0
+        
+        for update in updates_iterator:
+            update_device = update if update.device == agg_device else update.to(agg_device)
+            
+            sum_norm_sq += update_device.norm().item() ** 2
+            agg_dot_sum += torch.dot(update_device, aggregated_update).item()
+            count += 1
+            
+            del update_device
+        
+        if count == 0:
+            return 0.0
+        
+        mean_norm_sq = sum_norm_sq / count
+        noise = mean_norm_sq - 2 * (agg_dot_sum / count) + agg_norm_sq
+        
+        return signal / (max(noise, 1e-10) + 1e-10)
+    
+    @staticmethod
+    def compute_log_dsnr(dsnr: float, epsilon: float = 1e-10) -> float:
+        """
+        Compute logarithmic DSNR to avoid numerical underflow.
+        
+        Log-DSNR = 10 * log10(DSNR + epsilon)
+        
+        This prevents numerical instability when DSNR becomes very small
+        (e.g., 10^-10 or smaller) during later training rounds.
+        
+        Args:
+            dsnr: DSNR value
+            epsilon: Small constant to prevent log(0)
+        
+        Returns:
+            Log-DSNR value in dB scale
+        """
+        import math
+        return 10 * math.log10(max(dsnr, epsilon))
+    
     def compute_centralized_dsnr(
         self,
         updates: List[torch.Tensor],
@@ -217,7 +290,9 @@ class DSNRAnalyzer:
         
         return {
             "dsnr": dsnr,
+            "log_dsnr": self.compute_log_dsnr(dsnr),
             "decentralized_dsnr": decentralized_dsnr,
+            "log_decentralized_dsnr": self.compute_log_dsnr(decentralized_dsnr),
             "alignment_scores": alignment_scores.tolist(),
             "alignment_mean": float(alignment_scores.mean()),
             "alignment_std": float(alignment_scores.std()) if len(alignment_scores) > 1 else 0.0,

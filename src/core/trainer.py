@@ -53,6 +53,8 @@ class TrainerConfig:
     track_variance: bool = True
     track_convergence_speed: bool = True
     convergence_threshold: float = 0.8
+    track_fairness: bool = True
+    fairness_eval_freq: int = 10
     
     use_monitor: bool = False
     monitor_refresh_rate: float = 0.5
@@ -534,9 +536,51 @@ class FederatedTrainer:
                 current_acc = total_correct / total_samples
                 eval_pbar.set_postfix({"acc": f"{current_acc:.4f}"})
         
-        return {
+        metrics = {
             "accuracy": total_correct / total_samples,
             "loss": total_loss / total_samples,
+        }
+        
+        if self.config.track_fairness:
+            fairness_metrics = self._evaluate_fairness()
+            metrics.update(fairness_metrics)
+        
+        return metrics
+    
+    def _evaluate_fairness(self) -> Dict[str, float]:
+        """Evaluate per-client accuracy for fairness metrics."""
+        from ..utils.metrics import compute_bottom_k_accuracy, compute_fairness
+        
+        self.model.eval()
+        criterion = nn.CrossEntropyLoss()
+        
+        client_accuracies = {}
+        
+        with torch.no_grad():
+            for client_id, loader in self.client_loaders.items():
+                total_correct = 0
+                total_samples = 0
+                
+                for data, target in loader:
+                    data = data.to(self.device)
+                    target = target.to(self.device)
+                    
+                    output = self.model(data)
+                    pred = output.argmax(dim=1)
+                    total_correct += (pred == target).sum().item()
+                    total_samples += data.size(0)
+                
+                if total_samples > 0:
+                    client_accuracies[client_id] = total_correct / total_samples
+        
+        if not client_accuracies:
+            return {}
+        
+        return {
+            "bottom_10_accuracy": compute_bottom_k_accuracy(list(client_accuracies.values()), k=0.1),
+            "fairness_std": compute_fairness(list(client_accuracies.values()), metric="std"),
+            "fairness_min": compute_fairness(list(client_accuracies.values()), metric="min"),
+            "num_clients_evaluated": len(client_accuracies),
         }
     
     def _compute_dsnr_metrics(

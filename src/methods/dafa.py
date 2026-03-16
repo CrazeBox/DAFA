@@ -116,7 +116,7 @@ class DAFAAggregator(BaseAggregator):
                 self.momentum = self.momentum.to(delta_fedavg.device)
             self.momentum = (1 - self.beta) * delta_fedavg + self.beta * self.momentum
         
-        proxy_direction = self.momentum / (self.momentum.norm() + 1e-10)
+        proxy_direction = self.momentum / (self.momentum.norm() + 1e-8)
         
         alignment_scores, filtered_mask = self._compute_alignment_scores(
             updates, proxy_direction
@@ -196,7 +196,7 @@ class DAFAAggregator(BaseAggregator):
             norm = update.norm().item()
             
             if norm >= self.mu:
-                v_i = update / (norm + 1e-10)
+                v_i = update / (norm + 1e-8)
                 score = torch.dot(v_i, proxy_direction).item()
                 score = max(-1.0, min(1.0, score))
                 filtered_mask.append(False)
@@ -239,7 +239,7 @@ class DAFAAggregator(BaseAggregator):
         exp_scores = torch.exp(self.gamma * scores_tensor)
         weights = p_i * exp_scores
         
-        weights = weights / (weights.sum() + 1e-10)
+        weights = weights / (weights.sum() + 1e-8)
         
         return weights
     
@@ -299,7 +299,7 @@ class DAFAAggregator(BaseAggregator):
         deviation_norms = torch.tensor([d.norm().item() for d in deviations])
         noise = deviation_norms.std().item()
         
-        if noise < 1e-10:
+        if noise < 1e-8:
             return float('inf')
         
         return signal / noise
@@ -332,7 +332,7 @@ class DAFAAggregator(BaseAggregator):
         deviations = [u - aggregated_update for u in updates]
         noise = sum(d.norm().item() ** 2 for d in deviations) / len(deviations)
         
-        return signal / (noise + 1e-10)
+        return signal / (noise + 1e-8)
     
     def _compute_update_variance(
         self,
@@ -350,7 +350,7 @@ class DAFAAggregator(BaseAggregator):
     
     def _compute_weights_entropy(self, weights: torch.Tensor) -> float:
         """Compute entropy of weight distribution."""
-        weights = weights + 1e-10
+        weights = weights + 1e-8
         entropy = -(weights * torch.log(weights)).sum().item()
         max_entropy = math.log(len(weights))
         return entropy / max_entropy if max_entropy > 0 else 0.0
@@ -359,7 +359,7 @@ class DAFAAggregator(BaseAggregator):
         """Get current proxy direction v*."""
         if self.momentum is None:
             return None
-        return self.momentum / (self.momentum.norm() + 1e-10)
+        return self.momentum / (self.momentum.norm() + 1e-8)
     
     def get_alignment_scores(self) -> List[List[float]]:
         """Get history of alignment scores."""

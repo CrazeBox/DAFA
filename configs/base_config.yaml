@@ -17,6 +17,11 @@ optimizer:
   momentum: 0.9
   weight_decay: 0.0001
 
+fairness:
+  track_bottom_k: true
+  bottom_k_ratio: 0.1
+  eval_freq: 10
+
 checkpoint:
   save_dir: "results/checkpoints"
   save_freq: 50

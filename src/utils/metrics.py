@@ -160,7 +160,7 @@ def compute_fairness(
     
     Args:
         client_accuracies: List of per-client accuracies
-        metric: Fairness metric type (std, min, range)
+        metric: Fairness metric type (std, min, range, bottom_k)
     
     Returns:
         Fairness metric value
@@ -176,8 +176,36 @@ def compute_fairness(
         return float(np.min(acc_array))
     elif metric == "range":
         return float(np.max(acc_array) - np.min(acc_array))
+    elif metric == "bottom_k":
+        return compute_bottom_k_accuracy(client_accuracies, k=0.1)
     else:
         raise ValueError(f"Unknown fairness metric: {metric}")
+
+
+def compute_bottom_k_accuracy(
+    client_accuracies: List[float],
+    k: float = 0.1,
+) -> float:
+    """
+    Compute bottom k% accuracy (fairness metric).
+    
+    This metric measures the average accuracy of the worst k% clients,
+    directly addressing reviewer concerns about "Minority clients downweighted".
+    
+    Args:
+        client_accuracies: List of per-client accuracies
+        k: Fraction of clients to consider (default: 0.1 for bottom 10%)
+    
+    Returns:
+        Average accuracy of bottom k% clients
+    """
+    if not client_accuracies:
+        return 0.0
+    
+    sorted_accs = sorted(client_accuracies)
+    bottom_k_count = max(1, int(len(sorted_accs) * k))
+    
+    return float(np.mean(sorted_accs[:bottom_k_count]))
 
 
 class MetricsTracker:
