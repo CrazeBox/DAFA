@@ -10,6 +10,18 @@ from datetime import datetime
 from dataclasses import dataclass, asdict
 
 
+def _move_to_cpu(obj: Any) -> Any:
+    """Recursively move all tensors to CPU to avoid CUDA OOM during save."""
+    if isinstance(obj, torch.Tensor):
+        return obj.cpu()
+    elif isinstance(obj, dict):
+        return {k: _move_to_cpu(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)(_move_to_cpu(item) for item in obj)
+    else:
+        return obj
+
+
 @dataclass
 class CheckpointState:
     """Checkpoint state container."""
@@ -56,11 +68,23 @@ def save_checkpoint(
         filename = f"checkpoint_round_{state.round}.pt"
     
     filepath = save_dir / filename
-    torch.save(asdict(state), filepath)
+    
+    state_dict = {
+        "round": state.round,
+        "global_model_state": _move_to_cpu(state.global_model_state),
+        "optimizer_state": _move_to_cpu(state.optimizer_state),
+        "scheduler_state": _move_to_cpu(state.scheduler_state),
+        "best_metric": state.best_metric,
+        "metrics_history": _move_to_cpu(state.metrics_history),
+        "config": state.config,
+        "timestamp": state.timestamp,
+        "extra_state": _move_to_cpu(state.extra_state),
+    }
+    torch.save(state_dict, filepath)
     
     if is_best:
         best_path = save_dir / best_filename
-        torch.save(asdict(state), best_path)
+        torch.save(state_dict, best_path)
     
     return str(filepath)
 
