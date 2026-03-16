@@ -108,6 +108,8 @@ class LocalTrainer:
         global_params: Optional[torch.Tensor] = None,
         proximal_mu: float = 0.0,
         show_progress: bool = False,
+        client_control: Optional[torch.Tensor] = None,
+        global_control: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """
         Train locally for specified epochs.
@@ -116,6 +118,8 @@ class LocalTrainer:
             global_params: Global model parameters for proximal term
             proximal_mu: Proximal term coefficient
             show_progress: Whether to show progress bar
+            client_control: Client control variate (for SCAFFOLD)
+            global_control: Global control variate (for SCAFFOLD)
         
         Returns:
             Tuple of (update, training_info)
@@ -156,6 +160,10 @@ class LocalTrainer:
                         loss = loss + (proximal_mu / 2) * proximal_term
                 
                 self.scaler.scale(loss).backward()
+                
+                if client_control is not None and global_control is not None:
+                    self._apply_scaffold_correction(client_control, global_control)
+                
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 
@@ -172,13 +180,34 @@ class LocalTrainer:
         final_params = self._get_params()
         update = final_params - initial_params
         
+        new_control = None
+        if client_control is not None and global_control is not None:
+            new_control = client_control - global_control + update / (num_steps * self.config.local_lr)
+        
         info = {
             "loss": total_loss / total_samples if total_samples > 0 else 0.0,
             "num_samples": total_samples,
             "num_steps": num_steps,
+            "new_control": new_control,
         }
         
         return update, info
+    
+    def _apply_scaffold_correction(
+        self,
+        client_control: torch.Tensor,
+        global_control: torch.Tensor,
+    ) -> None:
+        """Apply SCAFFOLD control variate correction to gradients."""
+        control_diff = client_control - global_control
+        control_diff = control_diff.to(self.device)
+        
+        idx = 0
+        for param in self.model.parameters():
+            if param.grad is not None:
+                param_size = param.numel()
+                param.grad.data.add_(control_diff[idx:idx + param_size].view_as(param.data))
+                idx += param_size
     
     def _get_params(self) -> torch.Tensor:
         """Get flattened model parameters."""
@@ -297,10 +326,14 @@ class FederatedTrainer:
                 
                 round_time = time.time() - round_start
                 
-                metrics = self._evaluate()
+                train_loss, train_acc = self._evaluate_train_loss(selected_clients)
+                
+                metrics = self._evaluate(use_val=True)
                 metrics["round"] = self.current_round
                 metrics["round_time"] = round_time
                 metrics["total_time"] = time.time() - self.start_time
+                metrics["train_loss"] = train_loss
+                metrics["train_accuracy"] = train_acc
                 
                 if self.config.track_dsnr:
                     dsnr_metrics = self._compute_dsnr_metrics(client_updates)
@@ -318,13 +351,27 @@ class FederatedTrainer:
                     total_rounds=self.config.num_rounds,
                     is_train=True,
                     num_clients=len(selected_clients),
-                    loss=metrics["loss"],
-                    accuracy=metrics["accuracy"],
+                    loss=train_loss,
+                    accuracy=train_acc,
                     dsnr=metrics.get("dsnr"),
                     round_time=round_time,
                     total_time=metrics["total_time"],
                     persistent=(self.current_round % self.config.eval_every == 0),
                 )
+                
+                if self.val_loader:
+                    print_line(
+                        round_num=self.current_round,
+                        total_rounds=self.config.num_rounds,
+                        is_train=False,
+                        num_clients=0,
+                        loss=metrics["loss"],
+                        accuracy=metrics["accuracy"],
+                        dsnr=None,
+                        round_time=None,
+                        total_time=metrics["total_time"],
+                        persistent=(self.current_round % self.config.eval_every == 0),
+                    )
                 
                 if metrics["accuracy"] > self.best_accuracy:
                     self.best_accuracy = metrics["accuracy"]
@@ -392,6 +439,8 @@ class FederatedTrainer:
         else:
             client_pbar = client_ids
         
+        is_scaffold = hasattr(self.aggregator, 'get_client_control')
+        
         for client_id in client_pbar:
             if not use_monitor:
                 client_pbar.set_postfix({"client": client_id})
@@ -410,9 +459,17 @@ class FederatedTrainer:
             
             proximal_mu = getattr(self.aggregator, "mu", 0.0)
             
+            client_control = None
+            global_control = None
+            if is_scaffold:
+                client_control = self.aggregator.get_client_control(client_id, self.model)
+                global_control = self.aggregator.get_global_control(self.model)
+            
             update, info = local_trainer.train(
                 global_params=global_params,
                 proximal_mu=proximal_mu,
+                client_control=client_control,
+                global_control=global_control,
             )
             
             if use_monitor:
@@ -422,12 +479,17 @@ class FederatedTrainer:
                     samples=info["num_samples"],
                 )
             
+            extra_info = {}
+            if is_scaffold and info.get("new_control") is not None:
+                extra_info["new_control"] = info["new_control"]
+            
             client_update = ClientUpdate(
                 client_id=client_id,
                 update=update.cpu() if update.is_cuda else update,
                 num_samples=info["num_samples"],
                 loss=info["loss"],
                 num_steps=info["num_steps"],
+                extra_info=extra_info,
             )
             
             client_updates.append(client_update)
@@ -447,6 +509,8 @@ class FederatedTrainer:
         client_updates = []
         lock = threading.Lock()
         
+        is_scaffold = hasattr(self.aggregator, 'get_client_control')
+        
         def train_single_client(client_id: int) -> ClientUpdate:
             if use_monitor:
                 self.monitor_wrapper.on_client_start(client_id)
@@ -464,9 +528,17 @@ class FederatedTrainer:
                 
                 proximal_mu = getattr(self.aggregator, "mu", 0.0)
                 
+                client_control = None
+                global_control = None
+                if is_scaffold:
+                    client_control = self.aggregator.get_client_control(client_id, self.model)
+                    global_control = self.aggregator.get_global_control(self.model)
+                
                 update, info = local_trainer.train(
                     global_params=global_params,
                     proximal_mu=proximal_mu,
+                    client_control=client_control,
+                    global_control=global_control,
                 )
                 
                 if use_monitor:
@@ -476,12 +548,17 @@ class FederatedTrainer:
                         samples=info["num_samples"],
                     )
                 
+                extra_info = {}
+                if is_scaffold and info.get("new_control") is not None:
+                    extra_info["new_control"] = info["new_control"]
+                
                 return ClientUpdate(
                     client_id=client_id,
                     update=update.cpu(),
                     num_samples=info["num_samples"],
                     loss=info["loss"],
                     num_steps=info["num_steps"],
+                    extra_info=extra_info,
                 )
         
         num_parallel = getattr(self.config, 'num_parallel_clients', 4)
@@ -561,6 +638,43 @@ class FederatedTrainer:
             metrics.update(fairness_metrics)
         
         return metrics
+    
+    def _evaluate_train_loss(self, client_ids: List[int]) -> Tuple[float, float]:
+        """
+        Evaluate training loss on selected clients.
+        
+        Args:
+            client_ids: List of client IDs to evaluate
+        
+        Returns:
+            Tuple of (average_loss, average_accuracy)
+        """
+        self.model.eval()
+        criterion = nn.CrossEntropyLoss()
+        
+        total_loss = 0.0
+        total_correct = 0
+        total_samples = 0
+        
+        with torch.no_grad():
+            for client_id in client_ids:
+                loader = self.client_loaders[client_id]
+                for data, target in loader:
+                    data = data.to(self.device)
+                    target = target.to(self.device)
+                    
+                    output = self.model(data)
+                    loss = criterion(output, target)
+                    
+                    total_loss += loss.item() * data.size(0)
+                    pred = output.argmax(dim=1)
+                    total_correct += (pred == target).sum().item()
+                    total_samples += data.size(0)
+        
+        if total_samples == 0:
+            return 0.0, 0.0
+        
+        return total_loss / total_samples, total_correct / total_samples
     
     def _evaluate_fairness(self) -> Dict[str, float]:
         """Evaluate per-client accuracy for fairness metrics."""
