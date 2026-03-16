@@ -1,45 +1,46 @@
 # Best Hyperparameters Configuration
 # Reference: EXPERIMENT_DESIGN.md - Section 4.4
 # Generated from tuning experiments on CIFAR-10 (alpha=0.1)
+# Updated: local_lr changed from 0.01 to 0.003 for better stability
 
 FedAvg:
-  local_lr: 0.01
+  local_lr: 0.003
   description: "Baseline FedAvg with standard learning rate"
 
 FedProx:
-  local_lr: 0.01
+  local_lr: 0.003
   mu: 0.01
   description: "FedProx with proximal term coefficient"
 
 SCAFFOLD:
-  local_lr: 0.01
+  local_lr: 0.003
   server_lr: 1.0
   description: "SCAFFOLD with control variates"
 
 FedNova:
-  local_lr: 0.01
+  local_lr: 0.003
   description: "FedNova with normalized averaging"
 
 FedAvgM:
-  local_lr: 0.01
+  local_lr: 0.003
   server_momentum: 0.9
   description: "FedAvg with server-side momentum"
 
 FedAdam:
-  local_lr: 0.01
+  local_lr: 0.003
   server_lr: 0.01
   beta1: 0.9
   beta2: 0.999
   description: "FedAvg with server-side Adam optimizer"
 
 Dir-Weight:
-  local_lr: 0.01
+  local_lr: 0.003
   gamma: 1.0
   beta: 0.0
   description: "DAFA without momentum (ablation)"
 
 DAFA:
-  local_lr: 0.01
+  local_lr: 0.003
   gamma: 1.0
   beta: 0.9
   mu: 0.01

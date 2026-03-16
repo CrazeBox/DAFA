@@ -116,6 +116,7 @@ class CIFAR10Federated:
         alpha: float = 0.5,
         seed: int = 42,
         download: bool = True,
+        val_ratio: float = 0.1,
     ):
         """
         Initialize federated CIFAR-10 manager.
@@ -126,11 +127,13 @@ class CIFAR10Federated:
             alpha: Dirichlet concentration parameter
             seed: Random seed
             download: Whether to download if not exists
+            val_ratio: Ratio of training data to use for validation
         """
         self.root = Path(root)
         self.num_clients = num_clients
         self.alpha = alpha
         self.seed = seed
+        self.val_ratio = val_ratio
         
         self.train_dataset = CIFAR10Dataset(
             root=root,
@@ -144,6 +147,8 @@ class CIFAR10Federated:
             download=download,
         )
         
+        self._create_validation_set()
+        
         self.partition_manager = PartitionManager(
             partition_type="dirichlet",
             alpha=alpha,
@@ -153,6 +158,20 @@ class CIFAR10Federated:
         
         self.client_partitions: Optional[Dict[int, List[int]]] = None
     
+    def _create_validation_set(self):
+        """Create validation set from training data."""
+        np.random.seed(self.seed)
+        
+        num_train = len(self.train_dataset)
+        indices = np.random.permutation(num_train)
+        
+        num_val = int(num_train * self.val_ratio)
+        self.val_indices = indices[:num_val]
+        self.train_indices = indices[num_val:]
+        
+        self.val_dataset = Subset(self.train_dataset.dataset, self.val_indices)
+        self.train_dataset_for_partition = Subset(self.train_dataset.dataset, self.train_indices)
+    
     def create_partitions(self) -> Dict[int, List[int]]:
         """
         Create data partitions for all clients.
@@ -160,8 +179,13 @@ class CIFAR10Federated:
         Returns:
             Dictionary mapping client_id to sample indices
         """
+        labels = []
+        for idx in self.train_indices:
+            _, label = self.train_dataset[idx]
+            labels.append(label)
+        
         self.client_partitions = self.partition_manager.create_partition(
-            labels=self.train_dataset.get_labels(),
+            labels=np.array(labels),
             num_clients=self.num_clients,
         )
         return self.client_partitions
@@ -188,9 +212,11 @@ class CIFAR10Federated:
         if self.client_partitions is None:
             self.create_partitions()
         
-        client_indices = self.client_partitions.get(client_id, [])
-        if not client_indices:
+        client_partition_indices = self.client_partitions.get(client_id, [])
+        if not client_partition_indices:
             raise ValueError(f"No data for client {client_id}")
+        
+        client_indices = [self.train_indices[i] for i in client_partition_indices]
         
         client_dataset = self.train_dataset.get_client_dataset(client_indices)
         
@@ -219,6 +245,29 @@ class CIFAR10Federated:
         """
         return DataLoader(
             self.test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+        )
+    
+    def get_val_dataloader(
+        self,
+        batch_size: int = 128,
+        num_workers: int = 0,
+    ) -> DataLoader:
+        """
+        Get validation DataLoader.
+        
+        Args:
+            batch_size: Batch size
+            num_workers: Number of data loading workers
+        
+        Returns:
+            Validation DataLoader
+        """
+        return DataLoader(
+            self.val_dataset,
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
@@ -265,7 +314,8 @@ def get_cifar10_loaders(
     download: bool = True,
     num_workers: int = 0,
     lazy_init: bool = True,
-) -> Tuple[Dict[int, DataLoader], DataLoader, CIFAR10Federated]:
+    val_ratio: float = 0.1,
+) -> Tuple[Dict[int, DataLoader], DataLoader, DataLoader, CIFAR10Federated]:
     """
     Get CIFAR-10 data loaders for federated learning.
     
@@ -278,9 +328,10 @@ def get_cifar10_loaders(
         download: Whether to download if not exists
         num_workers: Number of data loading workers
         lazy_init: If True, return a lazy dict that creates DataLoaders on demand
+        val_ratio: Ratio of training data to use for validation
     
     Returns:
-        Tuple of (client_loaders, test_loader, data_manager)
+        Tuple of (client_loaders, val_loader, test_loader, data_manager)
     """
     manager = CIFAR10Federated(
         root=root,
@@ -288,6 +339,7 @@ def get_cifar10_loaders(
         alpha=alpha,
         seed=seed,
         download=download,
+        val_ratio=val_ratio,
     )
     
     manager.create_partitions()
@@ -312,7 +364,12 @@ def get_cifar10_loaders(
         num_workers=num_workers,
     )
     
-    return client_loaders, test_loader, manager
+    val_loader = manager.get_val_dataloader(
+        batch_size=batch_size * 2,
+        num_workers=num_workers,
+    )
+    
+    return client_loaders, val_loader, test_loader, manager
 
 
 class LazyClientLoaderDict:

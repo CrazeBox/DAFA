@@ -201,6 +201,7 @@ class FederatedTrainer:
         test_loader: DataLoader,
         config: TrainerConfig,
         validation_loader: Optional[DataLoader] = None,
+        val_loader: Optional[DataLoader] = None,
     ):
         """
         Initialize federated trainer.
@@ -209,14 +210,16 @@ class FederatedTrainer:
             model: Global model
             aggregator: Aggregation method
             client_loaders: Dictionary of client data loaders
-            test_loader: Test data loader
+            test_loader: Test data loader (for final evaluation only)
             config: Trainer configuration
             validation_loader: Optional validation loader for drift analysis
+            val_loader: Validation loader for hyperparameter selection
         """
         self.model = model
         self.aggregator = aggregator
         self.client_loaders = client_loaders
         self.test_loader = test_loader
+        self.val_loader = val_loader or validation_loader
         self.config = config
         
         self.device = config.device
@@ -229,6 +232,7 @@ class FederatedTrainer:
         
         self.current_round = 0
         self.best_accuracy = 0.0
+        self.best_val_accuracy = 0.0
         self.history: List[Dict[str, Any]] = []
         
         self.start_time = time.time()
@@ -502,9 +506,20 @@ class FederatedTrainer:
         
         return client_updates
     
-    def _evaluate(self) -> Dict[str, float]:
-        """Evaluate global model on test set."""
+    def _evaluate(self, use_val: bool = True) -> Dict[str, float]:
+        """
+        Evaluate global model.
+        
+        Args:
+            use_val: If True, use validation set; otherwise use test set
+        
+        Returns:
+            Dictionary of metrics
+        """
         self.model.eval()
+        
+        loader = self.val_loader if (use_val and self.val_loader) else self.test_loader
+        eval_name = "Validation" if (use_val and self.val_loader) else "Test"
         
         total_loss = 0.0
         total_correct = 0
@@ -513,8 +528,8 @@ class FederatedTrainer:
         criterion = nn.CrossEntropyLoss()
         
         eval_pbar = tqdm(
-            self.test_loader,
-            desc="Evaluating",
+            loader,
+            desc=f"Evaluating ({eval_name})",
             leave=False,
             dynamic_ncols=True,
         )

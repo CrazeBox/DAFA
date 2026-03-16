@@ -192,7 +192,7 @@ def get_dataset(args: argparse.Namespace) -> tuple:
     
     if dataset_name == "cifar10":
         cifar10_root = data_dir if "cifar10" in str(data_dir) else data_dir / "cifar10"
-        client_loaders, test_loader, data_manager = get_cifar10_loaders(
+        client_loaders, val_loader, test_loader, data_manager = get_cifar10_loaders(
             root=str(cifar10_root),
             num_clients=args.num_clients,
             alpha=args.alpha,
@@ -212,6 +212,7 @@ def get_dataset(args: argparse.Namespace) -> tuple:
             download=args.download,
             num_workers=args.num_workers,
         )
+        val_loader = test_loader
         num_classes = 62
     elif dataset_name == "shakespeare":
         shakespeare_root = data_dir if "shakespeare" in str(data_dir) else data_dir / "shakespeare"
@@ -223,11 +224,12 @@ def get_dataset(args: argparse.Namespace) -> tuple:
             download=args.download,
             num_workers=args.num_workers,
         )
+        val_loader = test_loader
         num_classes = 80
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
     
-    return client_loaders, test_loader, num_classes
+    return client_loaders, val_loader, test_loader, num_classes
 
 
 def get_model(model_name: str, num_classes: int) -> torch.nn.Module:
@@ -325,7 +327,7 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
         json.dump(vars(args), f, indent=2)
     
     logger.info("Loading dataset...")
-    client_loaders, test_loader, num_classes = get_dataset(args)
+    client_loaders, val_loader, test_loader, num_classes = get_dataset(args)
     logger.info(f"Dataset loaded: {len(client_loaders)} clients")
     
     logger.info("Creating model...")
@@ -352,6 +354,7 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
         model=model,
         aggregator=aggregator,
         client_loaders=client_loaders,
+        val_loader=val_loader,
         test_loader=test_loader,
         config=trainer_config,
     )
