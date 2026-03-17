@@ -35,6 +35,11 @@ class TrainerConfig:
     local_batch_size: int = 64
     
     client_lr_scheduler: str = "constant"
+    lr_decay_factor: float = 0.1
+    lr_decay_rounds: int = 50
+    cosine_decay_T_max: Optional[int] = None
+    cosine_decay_eta_min: float = 0.0
+    
     server_lr: float = 1.0
     
     eval_every: int = 10
@@ -72,6 +77,7 @@ class LocalTrainer:
         train_loader: DataLoader,
         config: TrainerConfig,
         client_id: int = 0,
+        current_round: int = 0,
     ):
         """
         Initialize local trainer.
@@ -81,11 +87,13 @@ class LocalTrainer:
             train_loader: Training data loader
             config: Trainer configuration
             client_id: Client identifier
+            current_round: Current global round (for learning rate scheduling)
         """
         self.model = model
         self.train_loader = train_loader
         self.config = config
         self.client_id = client_id
+        self.current_round = current_round
         self.device = config.device
         
         self.model.to(self.device)
@@ -102,6 +110,15 @@ class LocalTrainer:
         self.num_steps = 0
         
         self.scaler = torch.amp.GradScaler('cuda', enabled=config.use_amp)
+        
+        self.scheduler = None
+        if config.client_lr_scheduler == "cosine":
+            T_max = config.cosine_decay_T_max or config.num_rounds
+            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=T_max, eta_min=config.cosine_decay_eta_min
+            )
+            for _ in range(current_round):
+                self.scheduler.step()
     
     def train(
         self,
@@ -176,6 +193,9 @@ class LocalTrainer:
             total_samples += epoch_samples
         
         self.num_steps = num_steps
+        
+        if self.scheduler is not None:
+            self.scheduler.step()
         
         final_params = self._get_params()
         update = final_params - initial_params
@@ -455,9 +475,10 @@ class FederatedTrainer:
                 train_loader=train_loader,
                 config=self.config,
                 client_id=client_id,
+                current_round=self.current_round,
             )
             
-            proximal_mu = getattr(self.aggregator, "mu", 0.0)
+            proximal_mu = getattr(self.aggregator, "proximal_mu", 0.0)
             
             client_control = None
             global_control = None
@@ -524,9 +545,10 @@ class FederatedTrainer:
                     train_loader=train_loader,
                     config=self.config,
                     client_id=client_id,
+                    current_round=self.current_round,
                 )
                 
-                proximal_mu = getattr(self.aggregator, "mu", 0.0)
+                proximal_mu = getattr(self.aggregator, "proximal_mu", 0.0)
                 
                 client_control = None
                 global_control = None
@@ -633,7 +655,7 @@ class FederatedTrainer:
             "loss": total_loss / total_samples,
         }
         
-        if self.config.track_fairness:
+        if self.config.track_fairness and (self.current_round % self.config.fairness_eval_freq == 0):
             fairness_metrics = self._evaluate_fairness()
             metrics.update(fairness_metrics)
         

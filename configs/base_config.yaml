@@ -7,9 +7,10 @@ experiment:
 training:
   num_rounds: 200
   local_epochs: 5
-  batch_size: 64
+  batch_size: 32
   client_fraction: 0.1
   eval_freq: 10
+  lr_scheduler: "cosine"
 
 optimizer:
   type: "sgd"

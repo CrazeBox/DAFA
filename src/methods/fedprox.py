@@ -14,7 +14,7 @@ class FedProxConfig(AggregatorConfig):
     """Configuration for FedProx aggregator."""
     
     name: str = "fedprox"
-    mu: float = 0.01
+    proximal_mu: float = 0.01
 
 
 class FedProxAggregator(FedAvgAggregator):
@@ -32,7 +32,7 @@ class FedProxAggregator(FedAvgAggregator):
     
     def __init__(self, config: FedProxConfig):
         super().__init__(config)
-        self.mu = config.mu
+        self.proximal_mu = config.proximal_mu
     
     def aggregate(
         self,
@@ -67,15 +67,15 @@ class FedProxAggregator(FedAvgAggregator):
         Returns:
             Proximal term value
         """
-        return (self.mu / 2) * torch.norm(local_params - global_params) ** 2
+        return (self.proximal_mu / 2) * torch.norm(local_params - global_params) ** 2
     
     def state_dict(self) -> Dict[str, Any]:
         """Get aggregator state for checkpointing."""
         state = super().state_dict()
-        state["mu"] = self.mu
+        state["proximal_mu"] = self.proximal_mu
         return state
     
     def load_state_dict(self, state: Dict[str, Any]) -> None:
         """Load aggregator state from checkpoint."""
         super().load_state_dict(state)
-        self.mu = state.get("mu", 0.01)
+        self.proximal_mu = state.get("proximal_mu", 0.01)

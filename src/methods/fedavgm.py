@@ -67,7 +67,7 @@ class FedAvgMAggregator(BaseAggregator):
             update_tensor = self.get_update_tensor(update, global_params.device)
             aggregated_update += weights[i] * update_tensor
         
-        self.velocity = self.server_momentum * self.velocity + aggregated_update
+        self.velocity = self.server_momentum * self.velocity + (1 - self.server_momentum) * aggregated_update
         
         new_params = global_params + self.server_lr * self.velocity
         self.set_model_params(global_model, new_params)

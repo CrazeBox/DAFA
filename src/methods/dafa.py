@@ -253,8 +253,8 @@ class DAFAAggregator(BaseAggregator):
         filtered_mask: List[bool],
     ) -> None:
         """Record metrics for analysis."""
-        dsnr = self.compute_dsnr(updates, aggregated_update)
-        self.history["dsnr"].append(dsnr)
+        empirical_snr = self.compute_dsnr(updates, aggregated_update)
+        self.history["dsnr"].append(empirical_snr)
         
         scores_array = torch.tensor(alignment_scores)
         self.history["alignment_scores"].append(alignment_scores)
@@ -276,16 +276,23 @@ class DAFAAggregator(BaseAggregator):
         aggregated_update: Optional[torch.Tensor] = None,
     ) -> float:
         """
-        Compute Directional Signal-to-Noise Ratio.
+        Compute empirical Signal-to-Noise Ratio (empirical SNR).
         
-        DSNR = ||Δ_agg|| / std(||Δ_i - Δ_agg||)
+        Note: This is NOT the paper's DSNR. This is an empirical metric:
+        empirical_SNR = ||Δ_agg|| / std(||Δ_i - Δ_agg||)
+        
+        The paper's DSNR is defined as:
+        DSNR = <Δ_agg, v_true>² / E[||Δ_agg - Δ*||²]
+        
+        which requires the true global direction v_true.
+        Use compute_centralized_dsnr() from DSNRAnalyzer for the correct DSNR.
         
         Args:
             updates: List of client update tensors
             aggregated_update: Aggregated update (computed if None)
         
         Returns:
-            DSNR value
+            Empirical SNR value
         """
         if not updates:
             return 0.0

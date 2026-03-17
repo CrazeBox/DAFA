@@ -2,7 +2,7 @@ dataset:
   name: "femnist"
   num_classes: 62
   num_clients: 3597
-  sampled_clients: 100
+  sampled_clients: 200
 
 model:
   name: "cnn"
