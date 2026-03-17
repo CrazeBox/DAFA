@@ -204,7 +204,7 @@ def get_dataset(args: argparse.Namespace) -> tuple:
         num_classes = 10
     elif dataset_name == "femnist":
         femnist_root = data_dir if "femnist" in str(data_dir) else data_dir / "femnist"
-        client_loaders, test_loader, data_manager = get_femnist_loaders(
+        client_loaders, val_loader, test_loader, data_manager = get_femnist_loaders(
             root=str(femnist_root),
             num_clients=args.num_clients,
             batch_size=args.batch_size,
@@ -212,11 +212,10 @@ def get_dataset(args: argparse.Namespace) -> tuple:
             download=args.download,
             num_workers=args.num_workers,
         )
-        val_loader = test_loader
         num_classes = 62
     elif dataset_name == "shakespeare":
         shakespeare_root = data_dir if "shakespeare" in str(data_dir) else data_dir / "shakespeare"
-        client_loaders, test_loader, data_manager = get_shakespeare_loaders(
+        client_loaders, val_loader, test_loader, data_manager = get_shakespeare_loaders(
             root=str(shakespeare_root),
             num_clients=args.num_clients,
             batch_size=args.batch_size,
@@ -224,7 +223,6 @@ def get_dataset(args: argparse.Namespace) -> tuple:
             download=args.download,
             num_workers=args.num_workers,
         )
-        val_loader = test_loader
         num_classes = 80
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")

@@ -172,6 +172,7 @@ class FEMNISTFederated:
         num_clients: int = 100,
         seed: int = 42,
         download: bool = True,
+        val_ratio: float = 0.1,
     ):
         """
         Initialize federated FEMNIST manager.
@@ -181,10 +182,12 @@ class FEMNISTFederated:
             num_clients: Number of clients to sample
             seed: Random seed
             download: Whether to download if not exists
+            val_ratio: Ratio of training data to use for validation
         """
         self.root = Path(root)
         self.num_clients = num_clients
         self.seed = seed
+        self.val_ratio = val_ratio
         self.rng = np.random.RandomState(seed)
         
         self.train_dataset = FEMNISTDataset(
@@ -199,11 +202,27 @@ class FEMNISTFederated:
             download=download,
         )
         
+        self._create_validation_set()
+        
         self.client_partitions: Optional[Dict[int, List[int]]] = None
+    
+    def _create_validation_set(self):
+        """Create validation set from training data."""
+        np.random.seed(self.seed)
+        
+        num_train = len(self.train_dataset)
+        indices = np.random.permutation(num_train)
+        
+        num_val = int(num_train * self.val_ratio)
+        self.val_indices = indices[:num_val]
+        self.train_indices = indices[num_val:]
+        
+        self.val_dataset = Subset(self.train_dataset, self.val_indices)
+        self.train_dataset_for_partition = Subset(self.train_dataset, self.train_indices)
     
     def create_partitions(self) -> Dict[int, List[int]]:
         """
-        Create data partitions for all clients.
+        Create data partitions for all clients based on train_indices.
         
         Returns:
             Dictionary mapping client_id to sample indices
@@ -217,12 +236,16 @@ class FEMNISTFederated:
         
         self.client_partitions = {}
         
+        train_indices_set = set(self.train_indices)
+        
         for client_id, user_name in enumerate(unique_users):
             if client_id >= self.num_clients:
                 break
             
             user_indices = np.where(user_ids == user_name)[0]
-            self.client_partitions[client_id] = user_indices.tolist()
+            user_indices_in_train = [idx for idx in user_indices if idx in train_indices_set]
+            if user_indices_in_train:
+                self.client_partitions[client_id] = user_indices_in_train
         
         return self.client_partitions
     
@@ -285,6 +308,29 @@ class FEMNISTFederated:
             pin_memory=torch.cuda.is_available(),
         )
     
+    def get_val_dataloader(
+        self,
+        batch_size: int = 128,
+        num_workers: int = 0,
+    ) -> DataLoader:
+        """
+        Get validation DataLoader.
+        
+        Args:
+            batch_size: Batch size
+            num_workers: Number of data loading workers
+        
+        Returns:
+            Validation DataLoader
+        """
+        return DataLoader(
+            self.val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+        )
+    
     def get_partition_stats(self) -> Dict[str, float]:
         """Get partition statistics."""
         if self.client_partitions is None:
@@ -309,7 +355,8 @@ def get_femnist_loaders(
     download: bool = True,
     num_workers: int = 0,
     lazy_init: bool = True,
-) -> Tuple[Dict[int, DataLoader], DataLoader, FEMNISTFederated]:
+    val_ratio: float = 0.1,
+) -> Tuple[Dict[int, DataLoader], DataLoader, DataLoader, FEMNISTFederated]:
     """
     Get FEMNIST data loaders for federated learning.
     
@@ -321,9 +368,10 @@ def get_femnist_loaders(
         download: Whether to download if not exists
         num_workers: Number of data loading workers
         lazy_init: If True, return a lazy dict that creates DataLoaders on demand
+        val_ratio: Ratio of training data to use for validation
     
     Returns:
-        Tuple of (client_loaders, test_loader, data_manager)
+        Tuple of (client_loaders, val_loader, test_loader, data_manager)
     """
     from .cifar10 import LazyClientLoaderDict
     
@@ -332,6 +380,7 @@ def get_femnist_loaders(
         num_clients=num_clients,
         seed=seed,
         download=download,
+        val_ratio=val_ratio,
     )
     
     manager.create_partitions()
@@ -356,4 +405,9 @@ def get_femnist_loaders(
         num_workers=num_workers,
     )
     
-    return client_loaders, test_loader, manager
+    val_loader = manager.get_val_dataloader(
+        batch_size=batch_size * 2,
+        num_workers=num_workers,
+    )
+    
+    return client_loaders, val_loader, test_loader, manager
