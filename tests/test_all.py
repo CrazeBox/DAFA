@@ -100,7 +100,7 @@ class TestAggregators:
         from src.methods.fedprox import FedProxAggregator, FedProxConfig
         from src.methods.base import ClientUpdate
         
-        config = FedProxConfig(mu=0.01)
+        config = FedProxConfig(proximal_mu=0.01)
         aggregator = FedProxAggregator(config)
         
         model = nn.Linear(10, 5)
@@ -112,7 +112,7 @@ class TestAggregators:
         
         updated_model = aggregator.aggregate(model, updates)
         assert updated_model is not None
-        assert aggregator.mu == 0.01
+        assert aggregator.proximal_mu == 0.01
     
     def test_scaffold_aggregation(self):
         """Test SCAFFOLD aggregation."""
