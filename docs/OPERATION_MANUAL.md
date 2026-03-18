@@ -148,7 +148,7 @@ method:
 | `--alpha` | float | 0.5 | Dirichlet参数 |
 | `--seed` | int | 42 | 随机种子 |
 | `--device` | str | cuda | 计算设备 |
-| `--mu` | float | 0.5 | DAFA阈值/FedProx系数 |
+| `--mu` | float | 0.01 | DAFA阈值/FedProx系数 |
 | `--output_dir` | str | results | 输出目录 |
 | `--resume` | str | None | 恢复检查点路径 |
 
@@ -158,44 +158,25 @@ method:
 
 ### 4.1 阶段一：公平调参实验
 
-#### 4.1.1 FedProx调参
+#### 4.1.1 统一阶段一调参入口
 
 ```bash
-# 调整mu参数
-python scripts/run_tuning.py \
-    --method fedprox \
+python scripts/run_phase1_tuning.py \
     --dataset cifar10 \
-    --param mu \
-    --values 0.001 0.01 0.1 1.0 \
+    --alpha 0.1 \
     --num_rounds 50 \
     --num_repeats 3 \
-    --output_dir tuning_results/fedprox
+    --output_dir results/phase1_tuning
 ```
 
-#### 4.1.2 SCAFFOLD调参
+#### 4.1.2 一次运行五阶段实验
 
 ```bash
-python scripts/run_tuning.py \
-    --method scaffold \
-    --dataset cifar10 \
-    --param server_lr \
-    --values 0.1 0.5 1.0 \
-    --num_rounds 50 \
-    --num_repeats 3 \
-    --output_dir tuning_results/scaffold
-```
-
-#### 4.1.3 DAFA调参
-
-```bash
-python scripts/run_tuning.py \
-    --method dafa \
-    --dataset cifar10 \
-    --param mu \
-    --values 0.0 0.3 0.5 0.7 1.0 \
-    --num_rounds 50 \
-    --num_repeats 3 \
-    --output_dir tuning_results/dafa
+python scripts/run_five_stages.py \
+    --stages all \
+    --device cuda \
+    --num_rounds 100 \
+    --output_dir results/five_stages
 ```
 
 ### 4.2 阶段二：核心性能对比
@@ -216,6 +197,19 @@ python scripts/run_analysis.py \
     --compare results/phase2_comparison/* \
     --output_dir analysis/phase2 \
     --plot
+```
+
+```bash
+# 提取最优运行并生成汇总表
+python scripts/extract_best_runs.py \
+    --results_root results \
+    --output_dir results/summary
+
+# 生成论文风格图表
+python scripts/plot_results.py \
+    --best_runs results/summary/best_runs.json \
+    --output_dir results/summary/plots \
+    --format pdf
 ```
 
 ### 4.3 阶段三：机制分析
@@ -268,6 +262,12 @@ python scripts/run_experiment.py \
     --output_dir results/phase5_theory
 ```
 
+### 4.6 一键流水线（推荐）
+
+```bash
+bash scripts/study_pipeline.sh results/study_pipeline cuda 42,123,456 100
+```
+
 ---
 
 ## 5. 预期输出结果
@@ -276,17 +276,32 @@ python scripts/run_experiment.py \
 
 ```
 results/
-└── cifar10_dafa_20240101_120000/
-    ├── config.json           # 实验配置
-    ├── results.json          # 最终结果
-    ├── experiment.log        # 运行日志
-    ├── checkpoints/          # 检查点目录
-    │   ├── checkpoint_10.pt
-    │   ├── checkpoint_20.pt
-    │   └── best_model.pt
-    └── analysis/             # 分析结果
-        ├── training_curves.png
-        └── analysis_report.txt
+└── default/
+    └── cifar10_dafa_seed42_20240101_120000/
+        ├── config.json           # 实验配置
+        ├── metadata.json         # 运行元数据
+        ├── results.json          # 最终结果
+        ├── experiment.log        # 运行日志
+        └── checkpoints/
+            ├── checkpoint_round_10.pt
+            ├── checkpoint_round_20.pt
+            └── best_model.pt
+```
+
+流水线目录：
+
+```
+results/study_pipeline/
+├── phase1/
+├── five_stages/
+│   ├── five_stages_summary.json
+│   ├── pipeline_status.json
+│   └── stage*/**/failure.json   # 失败样本归档
+└── summary/
+    ├── all_runs.json
+    ├── best_runs.json
+    ├── best_runs.csv
+    └── plots/*.pdf
 ```
 
 ### 5.2 结果文件格式
@@ -418,7 +433,7 @@ python -c "import torch; ckpt = torch.load('checkpoints/checkpoint.pt', map_loca
 python scripts/run_experiment.py \
     --method dafa \
     --dataset cifar10 \
-    --resume results/cifar10_dafa_xxx/checkpoints/checkpoint_50.pt \
+    --resume results/default/cifar10_dafa_seed42_xxx/checkpoints/checkpoint_round_50.pt \
     --num_rounds 100
 ```
 
@@ -442,8 +457,10 @@ print(f'Best Accuracy: {ckpt[\"best_accuracy\"]}')
 ```bash
 # 完整的断点续跑示例
 python scripts/run_experiment.py \
-    --config configs/experiments/cifar10_dafa.yaml \
-    --resume results/cifar10_dafa_20240101/checkpoints/checkpoint_50.pt \
+    --config configs/base_config.yaml \
+    --method dafa \
+    --dataset cifar10 \
+    --resume results/default/cifar10_dafa_seed42_20240101/checkpoints/checkpoint_round_50.pt \
     --output_dir results/cifar10_dafa_resumed
 ```
 

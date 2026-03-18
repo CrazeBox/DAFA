@@ -3,6 +3,9 @@
 
 set -e
 
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_DIR"
+
 echo "=========================================="
 echo "  DAFA Quick Test (10 rounds)"
 echo "=========================================="
@@ -19,9 +22,9 @@ fi
 
 # If not in venv, try to activate venv
 if [ "$IN_VENV" = false ]; then
-    if [ -d "venv" ]; then
+    if [ -d "$PROJECT_DIR/venv" ]; then
         echo "Activating venv..."
-        source venv/bin/activate
+        source "$PROJECT_DIR/venv/bin/activate"
     else
         echo "No virtual environment found. Please activate your environment first:"
         echo "  conda activate jd"
@@ -58,5 +61,5 @@ echo "=========================================="
 echo "  Quick Test Complete!"
 echo "=========================================="
 echo ""
-echo "Results saved to: results/cifar10_dafa_*/"
+echo "Results saved to: results/default/cifar10_dafa_seed*/"
 echo ""

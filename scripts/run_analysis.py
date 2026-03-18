@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import sys
 import json
@@ -17,13 +18,7 @@ from typing import Dict, Any, List, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.analysis.analyzer import ExperimentAnalyzer, DSNRAnalyzer
-from src.utils.logger import get_logger
-
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -42,6 +37,13 @@ def parse_args():
     parser.add_argument("--plot_format", type=str, default="png",
                        choices=["png", "pdf", "svg"],
                        help="Plot output format")
+    parser.add_argument("--plot_dpi", type=int, default=220,
+                       help="DPI for saved plots")
+    parser.add_argument("--smooth_window", type=int, default=1,
+                       help="Moving average window for curves")
+    parser.add_argument("--style", type=str, default="whitegrid",
+                       choices=["whitegrid", "darkgrid", "ticks"],
+                       help="Seaborn plotting style")
     
     parser.add_argument("--compare", type=str, nargs="+",
                        help="Compare multiple experiment results")
@@ -50,6 +52,17 @@ def parse_args():
                        help="Enable verbose output")
     
     return parser.parse_args()
+
+
+def moving_average(values: List[float], window: int) -> List[float]:
+    if window <= 1 or len(values) <= 2:
+        return values
+    result = []
+    for i in range(len(values)):
+        left = max(0, i - window + 1)
+        chunk = values[left:i + 1]
+        result.append(float(np.mean(chunk)))
+    return result
 
 
 def load_results(path: str) -> Dict[str, Any]:
@@ -79,6 +92,9 @@ def analyze_single_experiment(
     output_dir: Path,
     generate_plots: bool = True,
     plot_format: str = "png",
+    plot_dpi: int = 220,
+    smooth_window: int = 1,
+    style: str = "whitegrid",
 ) -> Dict[str, Any]:
     """Analyze a single experiment's results."""
     analysis = {}
@@ -113,24 +129,27 @@ def analyze_single_experiment(
     }
     
     if generate_plots:
+        sns.set_theme(style=style, context="talk")
         output_dir.mkdir(parents=True, exist_ok=True)
         
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        smooth_acc = moving_average(accuracies, smooth_window)
+        smooth_loss = moving_average(losses, smooth_window)
         
-        axes[0].plot(rounds, accuracies, "b-", linewidth=2)
+        axes[0].plot(rounds, smooth_acc, "b-", linewidth=2)
         axes[0].set_xlabel("Round")
         axes[0].set_ylabel("Accuracy")
         axes[0].set_title("Test Accuracy over Rounds")
         axes[0].grid(True, alpha=0.3)
         
-        axes[1].plot(rounds, losses, "r-", linewidth=2)
+        axes[1].plot(rounds, smooth_loss, "r-", linewidth=2)
         axes[1].set_xlabel("Round")
         axes[1].set_ylabel("Loss")
         axes[1].set_title("Test Loss over Rounds")
         axes[1].grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(output_dir / f"training_curves.{plot_format}", dpi=150)
+        plt.savefig(output_dir / f"training_curves.{plot_format}", dpi=plot_dpi)
         plt.close()
     
     return analysis
@@ -141,6 +160,9 @@ def compare_experiments(
     names: List[str],
     output_dir: Path,
     plot_format: str = "png",
+    plot_dpi: int = 220,
+    smooth_window: int = 1,
+    style: str = "whitegrid",
 ) -> Dict[str, Any]:
     """Compare multiple experiments."""
     comparison = {
@@ -148,6 +170,7 @@ def compare_experiments(
         "metrics": {},
     }
     
+    sns.set_theme(style=style, context="talk")
     all_accuracies = []
     all_losses = []
     
@@ -168,10 +191,11 @@ def compare_experiments(
     output_dir.mkdir(parents=True, exist_ok=True)
     
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    palette = sns.color_palette("tab10", len(names))
     
-    for accuracies, name in zip(all_accuracies, names):
+    for idx, (accuracies, name) in enumerate(zip(all_accuracies, names)):
         rounds = list(range(1, len(accuracies) + 1))
-        axes[0].plot(rounds, accuracies, linewidth=2, label=name)
+        axes[0].plot(rounds, moving_average(accuracies, smooth_window), linewidth=2, label=name, color=palette[idx])
     
     axes[0].set_xlabel("Round")
     axes[0].set_ylabel("Accuracy")
@@ -179,9 +203,9 @@ def compare_experiments(
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
     
-    for losses, name in zip(all_losses, names):
+    for idx, (losses, name) in enumerate(zip(all_losses, names)):
         rounds = list(range(1, len(losses) + 1))
-        axes[1].plot(rounds, losses, linewidth=2, label=name)
+        axes[1].plot(rounds, moving_average(losses, smooth_window), linewidth=2, label=name, color=palette[idx])
     
     axes[1].set_xlabel("Round")
     axes[1].set_ylabel("Loss")
@@ -190,7 +214,7 @@ def compare_experiments(
     axes[1].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(output_dir / f"comparison_curves.{plot_format}", dpi=150)
+    plt.savefig(output_dir / f"comparison_curves.{plot_format}", dpi=plot_dpi)
     plt.close()
     
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -212,8 +236,15 @@ def compare_experiments(
         )
     
     plt.tight_layout()
-    plt.savefig(output_dir / f"accuracy_bar.{plot_format}", dpi=150)
+    plt.savefig(output_dir / f"accuracy_bar.{plot_format}", dpi=plot_dpi)
     plt.close()
+    
+    metrics_csv = output_dir / "comparison_metrics.csv"
+    lines = ["method,best_accuracy,final_accuracy,mean_accuracy"]
+    for name in names:
+        m = comparison["metrics"][name]
+        lines.append(f"{name},{m['best_accuracy']:.6f},{m['final_accuracy']:.6f},{m['mean_accuracy']:.6f}")
+    metrics_csv.write_text("\n".join(lines), encoding="utf-8")
     
     return comparison
 
@@ -288,6 +319,10 @@ def generate_report(
 def main():
     """Main entry point."""
     args = parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
     
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -305,6 +340,9 @@ def main():
             names,
             output_dir,
             args.plot_format,
+            args.plot_dpi,
+            args.smooth_window,
+            args.style,
         )
         
         with open(output_dir / "comparison_results.json", "w") as f:
@@ -321,6 +359,9 @@ def main():
             output_dir,
             generate_plots=args.plot,
             plot_format=args.plot_format,
+            plot_dpi=args.plot_dpi,
+            smooth_window=args.smooth_window,
+            style=args.style,
         )
         
         report = generate_report(analysis, output_dir)

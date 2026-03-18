@@ -52,10 +52,10 @@ git clone https://github.com/yourname/DAFA.git
 cd DAFA
 
 # 赋予执行权限
-chmod +x scripts/setup_ubuntu.sh
+chmod +x scripts/setup_env.sh
 
 # 运行安装脚本
-./scripts/setup_ubuntu.sh
+./scripts/setup_env.sh --profile ubuntu
 ```
 
 ### 2.2 安装脚本功能
@@ -247,10 +247,7 @@ source venv/bin/activate
 ### 5.2 单次实验
 
 ```bash
-# 使用启动脚本
-./scripts/run_dafa.sh --method dafa --dataset cifar10 --num_rounds 100
-
-# 或直接使用Python
+# 使用Python
 python scripts/run_experiment.py \
     --method dafa \
     --dataset cifar10 \
@@ -262,12 +259,15 @@ python scripts/run_experiment.py \
 
 ```bash
 # 运行所有实验
-./scripts/run_dafa.sh --experiment all
+python scripts/run_all_experiments.py --experiment all
+
+# 或运行完整流水线
+bash scripts/study_pipeline.sh results/study_pipeline cuda 42,123,456 100
 
 # 运行特定类型实验
-./scripts/run_dafa.sh --experiment baseline
-./scripts/run_dafa.sh --experiment sensitivity
-./scripts/run_dafa.sh --experiment ablation
+python scripts/run_all_experiments.py --experiment baseline
+python scripts/run_all_experiments.py --experiment sensitivity
+python scripts/run_all_experiments.py --experiment ablation
 ```
 
 ---
@@ -278,18 +278,15 @@ python scripts/run_experiment.py \
 
 ```bash
 # 启动tmux会话
-./scripts/tmux_session.sh start
+tmux new -s dafa
 
-# 连接到会话
-./scripts/tmux_session.sh attach
+# 在会话内运行实验
+python scripts/run_all_experiments.py --experiment all
 
 # 分离会话: Ctrl+B 然后按 D
 
-# 查看状态
-./scripts/tmux_session.sh status
-
-# 停止会话
-./scripts/tmux_session.sh stop
+# 重新连接
+tmux attach -t dafa
 ```
 
 ### 6.2 使用nohup
@@ -311,11 +308,30 @@ kill <PID>
 ### 6.3 使用systemd服务
 
 ```bash
-# 复制服务文件
-sudo cp scripts/dafa-experiment.service /etc/systemd/system/
-
-# 编辑服务文件，修改路径和用户名
+# 创建服务文件
 sudo nano /etc/systemd/system/dafa-experiment.service
+```
+
+写入以下内容（按实际路径修改）：
+
+```ini
+[Unit]
+Description=DAFA Batch Experiments
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/DAFA
+ExecStart=/path/to/DAFA/venv/bin/python scripts/run_all_experiments.py --experiment all
+Restart=on-failure
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# 保存后继续执行
 
 # 重载systemd
 sudo systemctl daemon-reload
@@ -446,8 +462,8 @@ python scripts/run_experiment.py --method dafa --dataset cifar10 --num_rounds 10
 python scripts/run_all_experiments.py --experiment all
 
 # 后台运行
-./scripts/run_dafa.sh --daemon --experiment all
-./scripts/tmux_session.sh start
+nohup python scripts/run_all_experiments.py --experiment all > logs/daemon.log 2>&1 &
+tmux new -s dafa
 
 # GPU监控
 watch -n 1 nvidia-smi              # 实时GPU状态
@@ -480,9 +496,9 @@ DAFA/
 ├── checkpoints/                # 模型检查点
 ├── logs/                       # 日志文件
 ├── scripts/                    # 脚本文件
-│   ├── setup_ubuntu.sh        # Ubuntu安装脚本
-│   ├── run_dafa.sh            # 实验启动脚本
-│   ├── tmux_session.sh        # tmux会话管理
+│   ├── setup_env.sh           # 统一环境安装脚本
+│   ├── run_five_stages.py     # 五阶段实验入口
+│   ├── study_pipeline.sh      # 一键流水线
 │   ├── run_experiment.py      # 单实验运行
 │   └── run_all_experiments.py # 批量实验
 ├── src/                        # 源代码

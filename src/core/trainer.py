@@ -11,6 +11,7 @@ import json
 import time
 from datetime import datetime
 from copy import deepcopy
+from contextlib import nullcontext
 from tqdm import tqdm
 
 from ..methods.base import ClientUpdate
@@ -66,6 +67,8 @@ class TrainerConfig:
     
     use_amp: bool = True
     num_parallel_clients: int = 4
+    malicious_client_fraction: float = 0.0
+    attack_type: str = "none"
 
 
 class LocalTrainer:
@@ -418,6 +421,27 @@ class FederatedTrainer:
         selected = random.sample(all_clients, num_select)
         
         return selected
+
+    def _is_malicious_client(self, client_id: int) -> bool:
+        fraction = getattr(self.config, "malicious_client_fraction", 0.0)
+        if fraction <= 0:
+            return False
+        import random
+        rng = random.Random(self.config.seed * 1000003 + self.current_round * 1009 + client_id)
+        return rng.random() < fraction
+
+    def _apply_attack(self, update: torch.Tensor, is_malicious: bool) -> torch.Tensor:
+        if not is_malicious:
+            return update
+        attack_type = getattr(self.config, "attack_type", "none")
+        if attack_type == "reverse":
+            return -update
+        if attack_type == "random":
+            scale = update.norm().item()
+            random_update = torch.randn_like(update)
+            random_norm = random_update.norm().item() + 1e-8
+            return random_update * (scale / random_norm)
+        return update
     
     def _train_clients(self, client_ids: List[int]) -> List[ClientUpdate]:
         """Train selected clients and collect updates."""
@@ -492,6 +516,8 @@ class FederatedTrainer:
                 client_control=client_control,
                 global_control=global_control,
             )
+            is_malicious = self._is_malicious_client(client_id)
+            update = self._apply_attack(update, is_malicious)
             
             if use_monitor:
                 self.monitor_wrapper.on_client_complete(
@@ -532,11 +558,14 @@ class FederatedTrainer:
         
         is_scaffold = hasattr(self.aggregator, 'get_client_control')
         
+        use_cuda_stream = self.device.startswith("cuda") and torch.cuda.is_available()
+
         def train_single_client(client_id: int) -> ClientUpdate:
             if use_monitor:
                 self.monitor_wrapper.on_client_start(client_id)
             
-            with torch.cuda.stream(torch.cuda.Stream()):
+            stream_context = torch.cuda.stream(torch.cuda.Stream()) if use_cuda_stream else nullcontext()
+            with stream_context:
                 local_model = deepcopy(self.model)
                 train_loader = self.client_loaders[client_id]
                 
@@ -562,6 +591,8 @@ class FederatedTrainer:
                     client_control=client_control,
                     global_control=global_control,
                 )
+                is_malicious = self._is_malicious_client(client_id)
+                update = self._apply_attack(update, is_malicious)
                 
                 if use_monitor:
                     self.monitor_wrapper.on_client_complete(

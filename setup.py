@@ -58,7 +58,7 @@ setup(
     entry_points={
         "console_scripts": [
             "dafa-run=scripts.run_experiment:main",
-            "dafa-tune=scripts.run_tuning:main",
+            "dafa-batch=scripts.run_all_experiments:main",
             "dafa-analyze=scripts.run_analysis:main",
         ],
     },

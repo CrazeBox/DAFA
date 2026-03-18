@@ -3,7 +3,7 @@
 Main experiment runner for DAFA federated learning experiments.
 
 Usage:
-    python run_experiment.py --config configs/experiments/cifar10_fedavg.yaml
+    python run_experiment.py --config configs/base_config.yaml
     python run_experiment.py --method dafa --dataset cifar10 --num_rounds 100
     python run_experiment.py --method dafa --dataset cifar10 --gamma 1.0 --beta 0.9
 """
@@ -47,6 +47,27 @@ logger = get_logger(__name__)
 
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
+
+
+def parse_bool(value: str) -> bool:
+    """Parse boolean values from CLI."""
+    if isinstance(value, bool):
+        return value
+    value = value.lower()
+    if value in {"true", "1", "yes", "y"}:
+        return True
+    if value in {"false", "0", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
+
+
+def _collect_config_values(config_obj: Any, out: Dict[str, Any]) -> None:
+    if isinstance(config_obj, dict):
+        for key, value in config_obj.items():
+            if isinstance(value, dict):
+                _collect_config_values(value, out)
+            else:
+                out[key] = value
 
 DATASET_LOADERS = {
     "cifar10": get_cifar10_loaders,
@@ -107,7 +128,7 @@ def parse_args():
     
     parser.add_argument("--data_root", type=str, default=None,
                        help="Root directory for datasets (default: project/data)")
-    parser.add_argument("--download", type=lambda x: x.lower() == 'true',
+    parser.add_argument("--download", type=parse_bool,
                        default=True,
                        help="Whether to download dataset if not exists")
     
@@ -118,6 +139,10 @@ def parse_args():
     
     parser.add_argument("--output_dir", type=str, default="results",
                        help="Output directory for results")
+    parser.add_argument("--run_group", type=str, default="default",
+                       help="Experiment group name for result organization")
+    parser.add_argument("--run_name", type=str, default=None,
+                       help="Optional explicit run name")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints",
                        help="Checkpoint directory")
     parser.add_argument("--resume", type=str, default=None,
@@ -134,7 +159,7 @@ def parse_args():
                        help="DAFA/Dir-Weight temperature parameter")
     parser.add_argument("--beta", type=float, default=0.9,
                        help="DAFA momentum coefficient")
-    parser.add_argument("--use_pi_weighting", type=lambda x: x.lower() == 'true',
+    parser.add_argument("--use_pi_weighting", type=parse_bool,
                        default=True,
                        help="Whether to use data size weighting p_i")
     parser.add_argument("--server_lr", type=float, default=1.0,
@@ -142,26 +167,35 @@ def parse_args():
     parser.add_argument("--server_momentum", type=float, default=0.9,
                        help="Server momentum for FedAvgM")
     
-    parser.add_argument("--track_dsnr", action="store_true", default=True,
+    parser.add_argument("--track_dsnr", type=parse_bool, default=True,
                        help="Track DSNR metrics")
-    parser.add_argument("--track_variance", action="store_true", default=True,
+    parser.add_argument("--track_variance", type=parse_bool, default=True,
                        help="Track update variance")
-    parser.add_argument("--track_convergence", action="store_true", default=True,
+    parser.add_argument("--track_convergence", type=parse_bool, default=True,
                        help="Track convergence speed")
     parser.add_argument("--convergence_threshold", type=float, default=0.8,
                        help="Accuracy threshold for convergence")
+    parser.add_argument("--track_fairness", type=parse_bool, default=True,
+                       help="Track fairness metrics")
+    parser.add_argument("--fairness_eval_freq", type=int, default=10,
+                       help="Evaluate fairness every N rounds")
     
-    parser.add_argument("--use_monitor", type=lambda x: x.lower() == 'true',
+    parser.add_argument("--use_monitor", type=parse_bool,
                        default=True,
                        help="Use real-time monitoring panel instead of progress bar")
     parser.add_argument("--monitor_refresh_rate", type=float, default=0.5,
                        help="Monitor refresh rate in seconds")
     
-    parser.add_argument("--use_amp", type=lambda x: x.lower() == 'true',
+    parser.add_argument("--use_amp", type=parse_bool,
                        default=True,
                        help="Use automatic mixed precision (AMP) for faster training")
     parser.add_argument("--num_parallel_clients", type=int, default=4,
                        help="Number of clients to train in parallel")
+    parser.add_argument("--malicious_client_fraction", type=float, default=0.0,
+                       help="Fraction of selected clients treated as malicious")
+    parser.add_argument("--attack_type", type=str, default="none",
+                       choices=["none", "reverse", "random"],
+                       help="Adversarial attack type for malicious clients")
     
     parser.add_argument("--verbose", action="store_true",
                        help="Enable verbose logging")
@@ -174,6 +208,30 @@ def load_config(config_path: str) -> Dict[str, Any]:
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     return config
+
+
+def apply_config_to_args(args: argparse.Namespace, config: Dict[str, Any]) -> int:
+    flattened: Dict[str, Any] = {}
+    _collect_config_values(config, flattened)
+    aliases: Dict[str, str] = {
+        "learning_rate": "local_lr",
+        "lr": "local_lr",
+        "rounds": "num_rounds",
+        "eval_freq": "eval_every",
+        "save_freq": "save_every",
+        "save_dir": "checkpoint_dir",
+    }
+    applied = 0
+    for key, value in flattened.items():
+        mapped_key = aliases.get(key, key)
+        if hasattr(args, mapped_key):
+            setattr(args, mapped_key, value)
+            applied += 1
+    if "client_fraction" in flattened and hasattr(args, "num_clients") and hasattr(args, "clients_per_round"):
+        client_fraction = float(flattened["client_fraction"])
+        args.clients_per_round = max(1, int(round(float(args.num_clients) * client_fraction)))
+        applied += 1
+    return applied
 
 
 def get_default_data_dir() -> Path:
@@ -246,7 +304,7 @@ def get_aggregator(method: str, args: argparse.Namespace) -> Any:
     }
     
     if method == "fedprox":
-        config["mu"] = args.mu
+        config["proximal_mu"] = args.mu
     elif method == "scaffold":
         config["server_lr"] = args.server_lr
     elif method == "fedavgm":
@@ -290,10 +348,14 @@ def create_trainer_config(args: argparse.Namespace) -> TrainerConfig:
         track_variance=args.track_variance,
         track_convergence_speed=args.track_convergence,
         convergence_threshold=args.convergence_threshold,
+        track_fairness=args.track_fairness,
+        fairness_eval_freq=args.fairness_eval_freq,
         use_monitor=args.use_monitor,
         monitor_refresh_rate=args.monitor_refresh_rate,
         use_amp=args.use_amp,
         num_parallel_clients=args.num_parallel_clients,
+        malicious_client_fraction=args.malicious_client_fraction,
+        attack_type=args.attack_type,
     )
 
 
@@ -301,12 +363,10 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
     """Run the federated learning experiment."""
     set_seed(args.seed)
     
-    output_dir = Path(args.output_dir)
-    
-    if not output_dir.exists():
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        experiment_name = f"{args.dataset}_{args.method}_{timestamp}"
-        output_dir = output_dir / experiment_name
+    output_base = Path(args.output_dir)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = args.run_name or f"{args.dataset}_{args.method}_seed{args.seed}_{timestamp}"
+    output_dir = output_base / args.run_group / run_name
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -320,9 +380,21 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info(f"Starting experiment: {experiment_name}")
     logger.info(f"Platform: {platform.system()} {platform.release()}")
     logger.info(f"Arguments: {vars(args)}")
+    logger.info(f"Run group: {args.run_group}")
     
     with open(output_dir / "config.json", "w") as f:
         json.dump(vars(args), f, indent=2)
+    
+    metadata = {
+        "run_name": run_name,
+        "run_group": args.run_group,
+        "status": "running",
+        "seed": args.seed,
+        "method": args.method,
+        "dataset": args.dataset,
+    }
+    with open(output_dir / "metadata.json", "w") as f:
+        json.dump(metadata, f, indent=2)
     
     logger.info("Loading dataset...")
     client_loaders, val_loader, test_loader, num_classes = get_dataset(args)
@@ -345,7 +417,11 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
             logger.info(f"  - beta: {args.beta}")
     
     trainer_config = create_trainer_config(args)
-    trainer_config.checkpoint_dir = str(output_dir / "checkpoints")
+    checkpoint_dir = Path(args.checkpoint_dir)
+    if checkpoint_dir.is_absolute():
+        trainer_config.checkpoint_dir = str(checkpoint_dir)
+    else:
+        trainer_config.checkpoint_dir = str(output_dir / checkpoint_dir)
     
     logger.info("Initializing trainer...")
     trainer = FederatedTrainer(
@@ -372,6 +448,15 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info(f"Experiment completed. Results saved to {results_path}")
     logger.info(f"Best accuracy: {results['best_accuracy']:.4f}")
     
+    metadata.update({
+        "status": "completed",
+        "best_accuracy": results["best_accuracy"],
+        "final_round": results["final_round"],
+        "total_time": results["total_time"],
+    })
+    with open(output_dir / "metadata.json", "w") as f:
+        json.dump(metadata, f, indent=2)
+    
     return results
 
 
@@ -381,9 +466,8 @@ def main():
     
     if args.config:
         config = load_config(args.config)
-        for key, value in config.items():
-            if hasattr(args, key):
-                setattr(args, key, value)
+        applied = apply_config_to_args(args, config)
+        logger.info(f"Applied {applied} config entries from {args.config}")
     
     if not torch.cuda.is_available() and args.device == "cuda":
         logger.warning("CUDA not available, using CPU")

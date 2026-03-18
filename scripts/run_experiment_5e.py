@@ -62,7 +62,7 @@ def run_single_experiment(
         f"--clients_per_round={num_clients_per_round}",
         f"--seed={seed}",
         f"--output_dir={output_dir}",
-        "--track_fairness",
+        "--track_fairness=true",
     ]
     
     print(f"\n{'='*60}")

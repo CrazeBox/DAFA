@@ -86,8 +86,8 @@ def run_single_experiment(config: Dict[str, Any], output_dir: Path) -> Dict[str,
     
     for key, value in config.items():
         if isinstance(value, bool):
-            if value:
-                cmd.append(f"--{key}")
+            cmd.append(f"--{key}")
+            cmd.append("true" if value else "false")
         else:
             cmd.append(f"--{key}")
             cmd.append(str(value))
@@ -345,6 +345,15 @@ def main():
                        help="Output directory for all experiments")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed")
+    parser.add_argument("--dataset", type=str, default=None,
+                       choices=DATASETS,
+                       help="Override dataset for all experiments")
+    parser.add_argument("--alpha", type=float, default=None,
+                       help="Override non-IID alpha for all experiments")
+    parser.add_argument("--num_rounds", type=int, default=None,
+                       help="Override number of rounds")
+    parser.add_argument("--device", type=str, default=None,
+                       help="Override device for all experiments")
     
     args = parser.parse_args()
     
@@ -354,6 +363,14 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     
     BASE_CONFIG["seed"] = args.seed
+    if args.num_rounds is not None:
+        BASE_CONFIG["num_rounds"] = args.num_rounds
+    if args.device is not None:
+        BASE_CONFIG["device"] = args.device
+    if args.dataset is not None:
+        DATASETS[:] = [args.dataset]
+    if args.alpha is not None:
+        NON_IID_LEVELS[:] = [args.alpha]
     
     all_results = {}
     

@@ -255,9 +255,9 @@ def test_file_permissions(result: TestResult):
                     result.add_warning(f"执行权限 {script}", str(e))
     
     shell_scripts = [
-        "scripts/setup_ubuntu.sh",
-        "scripts/run_dafa.sh",
-        "scripts/tmux_session.sh",
+        "scripts/setup_env.sh",
+        "scripts/run_experiment.sh",
+        "scripts/run_quick.sh",
     ]
     
     for script in shell_scripts:

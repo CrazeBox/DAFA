@@ -14,13 +14,16 @@ git clone https://github.com/your-username/DAFA.git
 cd DAFA
 
 # 2. Run setup (creates venv, installs dependencies, verifies GPU)
-bash scripts/setup.sh
+bash scripts/setup_env.sh --profile basic
 
 # 3. Run quick test (10 rounds, ~2 minutes)
 bash scripts/run_quick.sh
 
 # 4. Run full experiment
 bash scripts/run_experiment.sh
+
+# 5. Run full study pipeline
+bash scripts/study_pipeline.sh results/study_pipeline cuda 42,123,456 100
 ```
 
 ## Requirements
@@ -34,7 +37,7 @@ bash scripts/run_experiment.sh
 ### Option 1: Automatic Setup (Recommended)
 
 ```bash
-bash scripts/setup.sh
+bash scripts/setup_env.sh --profile basic
 ```
 
 ### Option 2: Manual Setup
@@ -120,9 +123,14 @@ python scripts/run_phase1_tuning.py \
 ```
 DAFA/
 ├── scripts/           # Experiment scripts
-│   ├── setup.sh       # One-click setup
+│   ├── setup_env.sh   # Unified environment setup
 │   ├── run_quick.sh   # Quick test
-│   └── run_experiment.py
+│   ├── run_experiment.py
+│   ├── run_five_stages.py
+│   ├── extract_best_runs.py
+│   ├── plot_results.py
+│   ├── run_analysis.py
+│   └── study_pipeline.sh
 ├── src/               # Source code
 │   ├── methods/       # Aggregation methods
 │   ├── models/        # Neural network models
@@ -139,12 +147,28 @@ After running experiments, results are saved to `results/`:
 
 ```
 results/
-├── cifar10_dafa_20240101_120000/
-│   ├── results.json       # Final metrics
-│   ├── config.json        # Experiment config
-│   ├── experiment.log     # Training log
-│   └── checkpoints/       # Model checkpoints
-│       └── best_model.pt  # Best model weights
+└── default/
+    └── cifar10_dafa_seed42_20240101_120000/
+        ├── results.json       # Final metrics
+        ├── metadata.json      # Run metadata
+        ├── config.json        # Experiment config
+        ├── experiment.log     # Training log
+        └── checkpoints/       # Model checkpoints
+            └── best_model.pt  # Best model weights
+```
+
+Pipeline outputs:
+
+```
+results/study_pipeline/
+├── phase1/
+├── five_stages/
+│   ├── five_stages_summary.json
+│   └── pipeline_status.json
+└── summary/
+    ├── best_runs.json
+    ├── best_runs.csv
+    └── plots/
 ```
 
 ## Citation

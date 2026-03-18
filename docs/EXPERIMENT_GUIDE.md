@@ -158,7 +158,7 @@ ls configs/
 python -c "
 from src.data.cifar10 import get_cifar10_loaders
 print('正在下载/验证CIFAR-10数据集...')
-loaders, test, _ = get_cifar10_loaders(root='data/cifar10', num_clients=10, alpha=0.5, batch_size=64, seed=42)
+loaders, val_loader, test_loader, data_manager = get_cifar10_loaders(root='data/cifar10', num_clients=10, alpha=0.5, batch_size=64, seed=42)
 print('CIFAR-10准备完成')
 "
 
@@ -202,9 +202,9 @@ python scripts/run_experiment.py `
     --device cuda `
     --seed 42 `
     --output_dir results `
-    --track_dsnr `
-    --track_variance `
-    --track_convergence
+    --track_dsnr true `
+    --track_variance true `
+    --track_convergence true
 ```
 
 #### 批量实验运行
@@ -359,13 +359,14 @@ Copy-Item -Path "checkpoints/*" -Destination "backup/checkpoints_$(Get-Date -For
 每次实验自动生成以下文件:
 
 ```
-results/{dataset}_{method}_{timestamp}/
+results/{run_group}/{run_name}/
 ├── config.json          # 实验配置
+├── metadata.json        # 运行元数据
 ├── experiment.log       # 运行日志
 ├── results.json         # 完整结果
 └── checkpoints/         # 模型检查点
-    ├── round_10.pt
-    ├── round_20.pt
+    ├── checkpoint_round_10.pt
+    ├── checkpoint_round_20.pt
     └── best_model.pt
 ```
 
