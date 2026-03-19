@@ -5,7 +5,7 @@ dataset:
   sampled_clients: 200
 
 model:
-  name: "cnn"
+  name: "twolayer_cnn"
   num_classes: 62
 
 data:

@@ -67,6 +67,9 @@ class FedNovaAggregator(BaseAggregator):
             effective_steps += data_weight * num_steps
         
         final_update = effective_steps * weighted_update
+
+        self.last_aggregated_update = final_update.detach().clone()
+        self.last_proxy_direction = final_update.detach().clone()
         
         new_params = global_params + final_update
         self.set_model_params(global_model, new_params)

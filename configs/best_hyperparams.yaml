@@ -49,8 +49,8 @@ DAFA:
 # Common settings for all methods
 common:
   local_epochs: 5
-  local_batch_size: 64
-  num_rounds: 100
+  local_batch_size: 32
+  num_rounds: 200
   clients_per_round: 10
   eval_every: 10
   seed: 42

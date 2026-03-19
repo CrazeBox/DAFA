@@ -61,6 +61,8 @@ class TrainerConfig:
     convergence_threshold: float = 0.8
     track_fairness: bool = True
     fairness_eval_freq: int = 10
+    task_type: str = "classification"
+    dsnr_validation_ratio: float = 0.02
     
     use_monitor: bool = False
     monitor_refresh_rate: float = 0.5
@@ -122,6 +124,13 @@ class LocalTrainer:
             )
             for _ in range(current_round):
                 self.scheduler.step()
+
+    def _forward_model(self, data: torch.Tensor) -> torch.Tensor:
+        """Forward model and unwrap auxiliary outputs."""
+        output = self.model(data)
+        if isinstance(output, tuple):
+            output = output[0]
+        return output
     
     def train(
         self,
@@ -172,7 +181,7 @@ class LocalTrainer:
                 self.optimizer.zero_grad()
                 
                 with torch.amp.autocast('cuda', enabled=self.config.use_amp):
-                    output = self.model(data)
+                    output = self._forward_model(data)
                     loss = self.criterion(output, target)
                     
                     if proximal_mu > 0 and global_params is not None:
@@ -284,6 +293,8 @@ class FederatedTrainer:
         
         self.current_round = 0
         self.best_accuracy = 0.0
+        self.best_perplexity = float("inf")
+        self.best_primary_metric = 0.0 if config.task_type == "classification" else float("inf")
         self.best_val_accuracy = 0.0
         self.history: List[Dict[str, Any]] = []
         
@@ -294,15 +305,16 @@ class FederatedTrainer:
         
         self.dsnr_analyzer = DSNRAnalyzer() if config.track_dsnr else None
         
+        analysis_loader = validation_loader or val_loader
         self.experiment_analyzer = ExperimentAnalyzer(
             output_dir=str(Path(config.results_dir) / "analysis"),
-            validation_loader=validation_loader,
+            validation_loader=analysis_loader,
             device=config.device,
         )
         
         self.convergence_round: Optional[int] = None
         self.convergence_threshold = config.convergence_threshold
-        
+
         self.monitor = None
         self.monitor_wrapper = None
         if config.use_monitor:
@@ -318,6 +330,80 @@ class FederatedTrainer:
                 logger.warning("Monitor module not available, using standard progress bar")
                 self.monitor = None
                 self.monitor_wrapper = None
+
+    def _forward_model(self, data: torch.Tensor) -> torch.Tensor:
+        """Forward model and unwrap auxiliary outputs."""
+        output = self.model(data)
+        if isinstance(output, tuple):
+            output = output[0]
+        return output
+
+    def _is_primary_metric_better(self, metrics: Dict[str, float]) -> bool:
+        """Check whether the current round improves the primary task metric."""
+        if self.config.task_type == "language_modeling":
+            current = metrics.get("perplexity")
+            return current is not None and current < self.best_primary_metric
+        current = metrics.get("accuracy")
+        return current is not None and current > self.best_primary_metric
+
+    def _update_best_metrics(self, metrics: Dict[str, float]) -> None:
+        """Update best-so-far metrics according to the task type."""
+        if "accuracy" in metrics:
+            self.best_accuracy = max(self.best_accuracy, metrics["accuracy"])
+        if "perplexity" in metrics:
+            self.best_perplexity = min(self.best_perplexity, metrics["perplexity"])
+        if self.config.task_type == "language_modeling" and "perplexity" in metrics:
+            self.best_primary_metric = self.best_perplexity
+        elif "accuracy" in metrics:
+            self.best_primary_metric = self.best_accuracy
+
+    def _compute_true_global_direction(self) -> Optional[torch.Tensor]:
+        """Approximate the paper's true global direction on a small validation subset."""
+        if self.val_loader is None:
+            return None
+
+        criterion = nn.CrossEntropyLoss()
+        was_training = self.model.training
+        self.model.eval()
+        self.model.zero_grad(set_to_none=True)
+
+        total_grad: Optional[torch.Tensor] = None
+        num_batches = 0
+        max_batches = max(1, int(len(self.val_loader) * self.config.dsnr_validation_ratio))
+
+        for batch_idx, (data, target) in enumerate(self.val_loader):
+            if batch_idx >= max_batches:
+                break
+
+            data = data.to(self.device)
+            target = target.to(self.device)
+
+            self.model.zero_grad(set_to_none=True)
+            output = self._forward_model(data)
+            loss = criterion(output, target)
+            loss.backward()
+
+            grad = torch.cat([
+                p.grad.view(-1)
+                for p in self.model.parameters()
+                if p.grad is not None
+            ])
+
+            if total_grad is None:
+                total_grad = grad.detach().clone()
+            else:
+                total_grad += grad.detach()
+
+            num_batches += 1
+
+        self.model.zero_grad(set_to_none=True)
+        if was_training:
+            self.model.train()
+
+        if total_grad is None or num_batches == 0:
+            return None
+
+        return -total_grad / num_batches
     
     def train(self) -> Dict[str, Any]:
         """
@@ -362,7 +448,11 @@ class FederatedTrainer:
                     dsnr_metrics = self._compute_dsnr_metrics(client_updates)
                     metrics.update(dsnr_metrics)
                 
-                if self.config.track_convergence_speed and self.convergence_round is None:
+                if (
+                    self.config.track_convergence_speed
+                    and self.config.task_type == "classification"
+                    and self.convergence_round is None
+                ):
                     if metrics["accuracy"] >= self.convergence_threshold:
                         self.convergence_round = self.current_round
                         logger.info(f"Convergence reached at round {self.current_round}")
@@ -396,10 +486,12 @@ class FederatedTrainer:
                         persistent=(self.current_round % self.config.eval_every == 0),
                     )
                 
-                if metrics["accuracy"] > self.best_accuracy:
-                    self.best_accuracy = metrics["accuracy"]
+                if self._is_primary_metric_better(metrics):
+                    self._update_best_metrics(metrics)
                     if self.current_round % self.config.eval_every == 0:
                         self._save_checkpoint(is_best=True)
+                else:
+                    self._update_best_metrics(metrics)
                 
                 if self.current_round % self.config.save_every == 0:
                     self._save_checkpoint()
@@ -669,7 +761,7 @@ class FederatedTrainer:
                 data = data.to(self.device)
                 target = target.to(self.device)
                 
-                output = self.model(data)
+                output = self._forward_model(data)
                 loss = criterion(output, target)
                 
                 total_loss += loss.item() * data.size(0)
@@ -685,6 +777,9 @@ class FederatedTrainer:
             "accuracy": total_correct / total_samples,
             "loss": total_loss / total_samples,
         }
+
+        if self.config.task_type == "language_modeling":
+            metrics["perplexity"] = compute_perplexity(metrics["loss"])
         
         if self.config.track_fairness and (self.current_round % self.config.fairness_eval_freq == 0):
             fairness_metrics = self._evaluate_fairness()
@@ -716,7 +811,7 @@ class FederatedTrainer:
                     data = data.to(self.device)
                     target = target.to(self.device)
                     
-                    output = self.model(data)
+                    output = self._forward_model(data)
                     loss = criterion(output, target)
                     
                     total_loss += loss.item() * data.size(0)
@@ -747,7 +842,7 @@ class FederatedTrainer:
                     data = data.to(self.device)
                     target = target.to(self.device)
                     
-                    output = self.model(data)
+                    output = self._forward_model(data)
                     pred = output.argmax(dim=1)
                     total_correct += (pred == target).sum().item()
                     total_samples += data.size(0)
@@ -780,9 +875,21 @@ class FederatedTrainer:
         
         device = self.device
         updates = [u.to(device) if u.device != device else u for u in updates]
-        aggregated_update = torch.stack(updates).mean(dim=0)
-        
-        dsnr = self.dsnr_analyzer.compute_dsnr(updates, aggregated_update)
+        aggregated_update = getattr(self.aggregator, "last_aggregated_update", None)
+        if aggregated_update is None:
+            aggregated_update = torch.stack(updates).mean(dim=0)
+        elif aggregated_update.device != device:
+            aggregated_update = aggregated_update.to(device)
+
+        empirical_snr = self.dsnr_analyzer.compute_dsnr(updates, aggregated_update)
+        true_direction = self._compute_true_global_direction()
+        centralized_dsnr = None
+        if true_direction is not None:
+            if true_direction.device != device:
+                true_direction = true_direction.to(device)
+            centralized_dsnr = self.dsnr_analyzer.compute_centralized_dsnr(
+                updates, aggregated_update, true_direction
+            )
         
         momentum = getattr(self.aggregator, "momentum", None)
         decentralized_dsnr = 0.0
@@ -793,7 +900,12 @@ class FederatedTrainer:
                 updates, aggregated_update, momentum
             )
         
-        proxy_direction = aggregated_update / (aggregated_update.norm() + 1e-10)
+        proxy_direction = getattr(self.aggregator, "last_proxy_direction", None)
+        if proxy_direction is None:
+            proxy_direction = aggregated_update
+        if proxy_direction.device != device:
+            proxy_direction = proxy_direction.to(device)
+        proxy_direction = proxy_direction / (proxy_direction.norm() + 1e-10)
         alignment_scores = self.dsnr_analyzer.compute_alignment_scores(
             updates, proxy_direction
         )
@@ -802,8 +914,9 @@ class FederatedTrainer:
         
         norms = torch.tensor([u.norm().item() for u in updates])
         
-        return {
-            "dsnr": dsnr,
+        metrics = {
+            "dsnr": centralized_dsnr if centralized_dsnr is not None else empirical_snr,
+            "empirical_snr": empirical_snr,
             "decentralized_dsnr": decentralized_dsnr,
             "alignment_mean": float(alignment_scores.mean()),
             "alignment_std": float(alignment_scores.std()) if len(alignment_scores) > 1 else 0.0,
@@ -811,6 +924,13 @@ class FederatedTrainer:
             "update_norm_mean": float(norms.mean()),
             "update_norm_std": float(norms.std()) if len(norms) > 1 else 0.0,
         }
+
+        if centralized_dsnr is not None:
+            metrics["centralized_dsnr"] = centralized_dsnr
+            true_norm = true_direction / (true_direction.norm() + 1e-10)
+            metrics["proxy_reliability"] = float(torch.dot(proxy_direction, true_norm).item())
+
+        return metrics
     
     def _get_model_params(self) -> torch.Tensor:
         """Get flattened model parameters."""
@@ -823,6 +943,8 @@ class FederatedTrainer:
             "model_state_dict": self.model.state_dict(),
             "aggregator_state": self.aggregator.state_dict(),
             "best_accuracy": self.best_accuracy,
+            "best_perplexity": self.best_perplexity,
+            "best_primary_metric": self.best_primary_metric,
             "history": self.history,
             "config": self.config.__dict__,
             "convergence_round": self.convergence_round,
@@ -845,6 +967,11 @@ class FederatedTrainer:
         self.aggregator.load_state_dict(state["aggregator_state"])
         self.current_round = state["round"]
         self.best_accuracy = state.get("best_accuracy", 0.0)
+        self.best_perplexity = state.get("best_perplexity", float("inf"))
+        self.best_primary_metric = state.get(
+            "best_primary_metric",
+            self.best_accuracy if self.config.task_type == "classification" else self.best_perplexity,
+        )
         self.history = state.get("history", [])
         self.convergence_round = state.get("convergence_round", None)
         
@@ -854,6 +981,9 @@ class FederatedTrainer:
         """Get final training results."""
         results = {
             "best_accuracy": self.best_accuracy,
+            "best_perplexity": None if self.best_perplexity == float("inf") else self.best_perplexity,
+            "best_primary_metric": self.best_primary_metric,
+            "primary_metric_name": "perplexity" if self.config.task_type == "language_modeling" else "accuracy",
             "final_round": self.current_round,
             "total_time": time.time() - self.start_time,
             "history": self.history,
@@ -877,6 +1007,14 @@ class FederatedTrainer:
                     "mean": float(sum(variance_values) / len(variance_values)),
                     "min": float(min(variance_values)),
                     "max": float(max(variance_values)),
+                }
+
+            perplexity_values = [h.get("perplexity", 0) for h in self.history if "perplexity" in h]
+            if perplexity_values:
+                results["perplexity_summary"] = {
+                    "mean": float(sum(perplexity_values) / len(perplexity_values)),
+                    "min": float(min(perplexity_values)),
+                    "max": float(max(perplexity_values)),
                 }
         
         return results

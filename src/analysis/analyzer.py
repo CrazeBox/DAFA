@@ -351,43 +351,47 @@ class DriftAlignmentAnalyzer:
         Returns:
             Flattened gradient tensor
         """
+        was_training = model.training
         model.eval()
-        model.zero_grad()
+        model.zero_grad(set_to_none=True)
         
         total_grad = None
         num_batches = 0
         max_batches = max(1, int(len(self.validation_loader) * self.validation_ratio))
         
-        with torch.no_grad():
-            for batch_idx, (data, target) in enumerate(self.validation_loader):
-                if batch_idx >= max_batches:
-                    break
-                
-                data = data.to(self.device)
-                target = target.to(self.device)
-                
-                model_copy = model
-                model_copy.zero_grad()
-                
-                output = model_copy(data)
-                loss = F.cross_entropy(output, target)
-                loss.backward()
-                
-                grad = torch.cat([p.grad.view(-1) for p in model_copy.parameters() if p.grad is not None])
-                
-                if total_grad is None:
-                    total_grad = grad.clone()
-                else:
-                    total_grad += grad
-                
-                num_batches += 1
-        
-        model.zero_grad()
+        for batch_idx, (data, target) in enumerate(self.validation_loader):
+            if batch_idx >= max_batches:
+                break
+
+            data = data.to(self.device)
+            target = target.to(self.device)
+
+            model.zero_grad(set_to_none=True)
+
+            output = model(data)
+            if isinstance(output, tuple):
+                output = output[0]
+
+            loss = F.cross_entropy(output, target)
+            loss.backward()
+
+            grad = torch.cat([p.grad.view(-1) for p in model.parameters() if p.grad is not None])
+
+            if total_grad is None:
+                total_grad = grad.detach().clone()
+            else:
+                total_grad += grad.detach()
+
+            num_batches += 1
+
+        model.zero_grad(set_to_none=True)
+        if was_training:
+            model.train()
         
         if total_grad is None:
             return None
         
-        return total_grad / num_batches
+        return -total_grad / num_batches
     
     def compute_proxy_reliability(
         self,

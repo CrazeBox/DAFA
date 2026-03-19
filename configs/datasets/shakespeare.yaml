@@ -1,7 +1,7 @@
 dataset:
   name: "shakespeare"
   num_classes: 80
-  num_clients: 1129
+  num_clients: 1115
   sampled_clients: 100
 
 model:
@@ -9,7 +9,7 @@ model:
   num_classes: 80
   hidden_size: 256
   num_layers: 2
-  embedding_dim: 8
+  embedding_dim: 200
 
 data:
   root: "data/shakespeare"

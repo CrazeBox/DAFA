@@ -42,6 +42,8 @@ class BaseAggregator(ABC):
         self.config = config
         self.device = config.device
         self.round_num = 0
+        self.last_aggregated_update: Optional[torch.Tensor] = None
+        self.last_proxy_direction: Optional[torch.Tensor] = None
     
     @abstractmethod
     def aggregate(
@@ -143,3 +145,5 @@ class BaseAggregator(ABC):
     def reset(self) -> None:
         """Reset aggregator state."""
         self.round_num = 0
+        self.last_aggregated_update = None
+        self.last_proxy_direction = None

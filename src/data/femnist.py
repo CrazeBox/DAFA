@@ -25,6 +25,7 @@ class FEMNISTDataset(Dataset):
         root: str,
         train: bool = True,
         download: bool = True,
+        allow_synthetic_data: bool = False,
         transform: Optional[Callable] = None,
     ):
         """
@@ -38,6 +39,7 @@ class FEMNISTDataset(Dataset):
         """
         self.root = Path(root)
         self.train = train
+        self.allow_synthetic_data = allow_synthetic_data
         self.transform = transform or transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5,), (0.5,)),
@@ -79,8 +81,13 @@ class FEMNISTDataset(Dataset):
                     urllib.request.urlretrieve(url, all_data_path)
                     print(f"Downloaded {split} data")
                 except Exception as e:
-                    print(f"Failed to download {split} data: {e}")
-                    self._create_synthetic_data(split_dir)
+                    if self.allow_synthetic_data:
+                        print(f"Failed to download {split} data: {e}")
+                        self._create_synthetic_data(split_dir)
+                    else:
+                        raise RuntimeError(
+                            f"Failed to download FEMNIST {split} split and synthetic fallback is disabled: {e}"
+                        ) from e
     
     def _create_synthetic_data(self, split_dir: Path) -> None:
         """Create synthetic FEMNIST-like data for testing."""
@@ -112,9 +119,15 @@ class FEMNISTDataset(Dataset):
         all_data_path = self.data_dir / "all_data.json"
         
         if not all_data_path.exists():
-            print(f"Data file not found: {all_data_path}")
-            print("Creating synthetic data...")
-            self._create_synthetic_data(self.data_dir)
+            if self.allow_synthetic_data:
+                print(f"Data file not found: {all_data_path}")
+                print("Creating synthetic data...")
+                self._create_synthetic_data(self.data_dir)
+            else:
+                raise FileNotFoundError(
+                    f"Missing FEMNIST data file: {all_data_path}. "
+                    "Provide the real dataset or rerun with synthetic fallback enabled."
+                )
         
         with open(all_data_path, "r") as f:
             data = json.load(f)
@@ -172,6 +185,7 @@ class FEMNISTFederated:
         num_clients: int = 100,
         seed: int = 42,
         download: bool = True,
+        allow_synthetic_data: bool = False,
         val_ratio: float = 0.1,
     ):
         """
@@ -194,12 +208,14 @@ class FEMNISTFederated:
             root=root,
             train=True,
             download=download,
+            allow_synthetic_data=allow_synthetic_data,
         )
         
         self.test_dataset = FEMNISTDataset(
             root=root,
             train=False,
             download=download,
+            allow_synthetic_data=allow_synthetic_data,
         )
         
         self._create_validation_set()
@@ -353,6 +369,7 @@ def get_femnist_loaders(
     batch_size: int = 64,
     seed: int = 42,
     download: bool = True,
+    allow_synthetic_data: bool = False,
     num_workers: int = 0,
     lazy_init: bool = True,
     val_ratio: float = 0.1,
@@ -380,6 +397,7 @@ def get_femnist_loaders(
         num_clients=num_clients,
         seed=seed,
         download=download,
+        allow_synthetic_data=allow_synthetic_data,
         val_ratio=val_ratio,
     )
     

@@ -75,6 +75,46 @@ DATASET_LOADERS = {
     "shakespeare": get_shakespeare_loaders,
 }
 
+DATASET_PROFILES: Dict[str, Dict[str, Any]] = {
+    "cifar10": {
+        "model": "resnet18",
+        "num_rounds": 200,
+        "num_clients": 100,
+        "clients_per_round": 10,
+        "local_epochs": 5,
+        "local_lr": 0.01,
+        "batch_size": 32,
+        "task_type": "classification",
+        "client_lr_scheduler": "cosine",
+    },
+    "femnist": {
+        "model": "twolayer_cnn",
+        "num_rounds": 200,
+        "num_clients": 200,
+        "clients_per_round": 20,
+        "local_epochs": 10,
+        "local_lr": 0.01,
+        "batch_size": 32,
+        "task_type": "classification",
+        "client_lr_scheduler": "cosine",
+    },
+    "shakespeare": {
+        "model": "lstm",
+        "num_rounds": 200,
+        "num_clients": 100,
+        "clients_per_round": 10,
+        "local_epochs": 2,
+        "local_lr": 0.01,
+        "batch_size": 32,
+        "task_type": "language_modeling",
+        "client_lr_scheduler": "cosine",
+        "seq_length": 80,
+        "embedding_dim": 200,
+        "hidden_size": 256,
+        "num_layers": 2,
+    },
+}
+
 MODEL_CREATORS = {
     "resnet18": lambda num_classes: ResNet18(num_classes=num_classes),
     "cnn": lambda num_classes: SimpleCNN(num_classes=num_classes),
@@ -105,20 +145,20 @@ def parse_args():
     parser.add_argument("--dataset", type=str, default="cifar10",
                        choices=list(DATASET_LOADERS.keys()),
                        help="Dataset name")
-    parser.add_argument("--model", type=str, default="resnet18",
+    parser.add_argument("--model", type=str, default=None,
                        help="Model architecture")
     
-    parser.add_argument("--num_rounds", type=int, default=100,
+    parser.add_argument("--num_rounds", type=int, default=None,
                        help="Number of training rounds")
-    parser.add_argument("--num_clients", type=int, default=100,
+    parser.add_argument("--num_clients", type=int, default=None,
                        help="Number of total clients")
-    parser.add_argument("--clients_per_round", type=int, default=10,
+    parser.add_argument("--clients_per_round", type=int, default=None,
                        help="Number of clients per round")
-    parser.add_argument("--local_epochs", type=int, default=5,
+    parser.add_argument("--local_epochs", type=int, default=None,
                        help="Number of local epochs")
-    parser.add_argument("--local_lr", type=float, default=0.01,
+    parser.add_argument("--local_lr", type=float, default=None,
                        help="Local learning rate")
-    parser.add_argument("--batch_size", type=int, default=64,
+    parser.add_argument("--batch_size", type=int, default=None,
                        help="Batch size for local training")
     
     parser.add_argument("--alpha", type=float, default=0.5,
@@ -131,11 +171,22 @@ def parse_args():
     parser.add_argument("--download", type=parse_bool,
                        default=True,
                        help="Whether to download dataset if not exists")
+    parser.add_argument("--allow_synthetic_data", type=parse_bool,
+                       default=False,
+                       help="Allow synthetic FEMNIST/Shakespeare fallback data for debugging")
     
     parser.add_argument("--device", type=str, default="cuda",
                        help="Device to use (cuda/cpu)")
     parser.add_argument("--num_workers", type=int, default=0,
                        help="Number of data loading workers")
+    parser.add_argument("--seq_length", type=int, default=None,
+                       help="Sequence length for Shakespeare")
+    parser.add_argument("--embedding_dim", type=int, default=None,
+                       help="Embedding dimension for Shakespeare LSTM")
+    parser.add_argument("--hidden_size", type=int, default=None,
+                       help="Hidden size for Shakespeare LSTM")
+    parser.add_argument("--num_layers", type=int, default=None,
+                       help="Number of LSTM layers for Shakespeare")
     
     parser.add_argument("--output_dir", type=str, default="results",
                        help="Output directory for results")
@@ -166,6 +217,12 @@ def parse_args():
                        help="Server learning rate")
     parser.add_argument("--server_momentum", type=float, default=0.9,
                        help="Server momentum for FedAvgM")
+    parser.add_argument("--beta1", type=float, default=0.9,
+                       help="Beta1 for FedAdam")
+    parser.add_argument("--beta2", type=float, default=0.999,
+                       help="Beta2 for FedAdam")
+    parser.add_argument("--tau", type=float, default=1e-3,
+                       help="Tau for FedAdam")
     
     parser.add_argument("--track_dsnr", type=parse_bool, default=True,
                        help="Track DSNR metrics")
@@ -179,6 +236,16 @@ def parse_args():
                        help="Track fairness metrics")
     parser.add_argument("--fairness_eval_freq", type=int, default=10,
                        help="Evaluate fairness every N rounds")
+    parser.add_argument("--task_type", type=str, default=None,
+                       choices=["classification", "language_modeling"],
+                       help="Evaluation task type")
+    parser.add_argument("--client_lr_scheduler", type=str, default=None,
+                       choices=["constant", "cosine"],
+                       help="Client learning-rate scheduler")
+    parser.add_argument("--cosine_decay_T_max", type=int, default=None,
+                       help="T_max for cosine learning-rate decay")
+    parser.add_argument("--cosine_decay_eta_min", type=float, default=0.0,
+                       help="Minimum learning rate for cosine decay")
     
     parser.add_argument("--use_monitor", type=parse_bool,
                        default=True,
@@ -220,6 +287,9 @@ def apply_config_to_args(args: argparse.Namespace, config: Dict[str, Any]) -> in
         "eval_freq": "eval_every",
         "save_freq": "save_every",
         "save_dir": "checkpoint_dir",
+        "local_batch_size": "batch_size",
+        "lr_scheduler": "client_lr_scheduler",
+        "sampled_clients": "num_clients",
     }
     applied = 0
     for key, value in flattened.items():
@@ -232,6 +302,21 @@ def apply_config_to_args(args: argparse.Namespace, config: Dict[str, Any]) -> in
         args.clients_per_round = max(1, int(round(float(args.num_clients) * client_fraction)))
         applied += 1
     return applied
+
+
+def resolve_dataset_defaults(args: argparse.Namespace) -> None:
+    """Fill unset CLI arguments with dataset defaults from the paper setup."""
+    profile = DATASET_PROFILES[args.dataset]
+
+    for key, value in profile.items():
+        if hasattr(args, key) and getattr(args, key) is None:
+            setattr(args, key, value)
+
+    if args.clients_per_round is None and args.num_clients is not None:
+        args.clients_per_round = max(1, int(round(args.num_clients * 0.1)))
+
+    if args.cosine_decay_T_max is None:
+        args.cosine_decay_T_max = args.num_rounds
 
 
 def get_default_data_dir() -> Path:
@@ -268,6 +353,7 @@ def get_dataset(args: argparse.Namespace) -> tuple:
             batch_size=args.batch_size,
             seed=args.seed,
             download=args.download,
+            allow_synthetic_data=args.allow_synthetic_data,
             num_workers=args.num_workers,
         )
         num_classes = 62
@@ -276,9 +362,11 @@ def get_dataset(args: argparse.Namespace) -> tuple:
         client_loaders, val_loader, test_loader, data_manager = get_shakespeare_loaders(
             root=str(shakespeare_root),
             num_clients=args.num_clients,
+            seq_length=args.seq_length,
             batch_size=args.batch_size,
             seed=args.seed,
             download=args.download,
+            allow_synthetic_data=args.allow_synthetic_data,
             num_workers=args.num_workers,
         )
         num_classes = 80
@@ -288,11 +376,19 @@ def get_dataset(args: argparse.Namespace) -> tuple:
     return client_loaders, val_loader, test_loader, num_classes
 
 
-def get_model(model_name: str, num_classes: int) -> torch.nn.Module:
+def get_model(model_name: str, num_classes: int, args: argparse.Namespace) -> torch.nn.Module:
     """Get model based on name and number of classes."""
     if model_name not in MODEL_CREATORS:
         raise ValueError(f"Unknown model: {model_name}")
-    
+
+    if model_name == "lstm":
+        return ShakespeareLSTM(
+            vocab_size=num_classes,
+            embedding_dim=args.embedding_dim,
+            hidden_size=args.hidden_size,
+            num_layers=args.num_layers,
+        )
+
     return MODEL_CREATORS[model_name](num_classes)
 
 
@@ -312,6 +408,9 @@ def get_aggregator(method: str, args: argparse.Namespace) -> Any:
         config["server_lr"] = args.server_lr
     elif method == "fedadam":
         config["server_lr"] = args.server_lr
+        config["beta1"] = args.beta1
+        config["beta2"] = args.beta2
+        config["tau"] = args.tau
     elif method == "dafa":
         config["gamma"] = args.gamma
         config["beta"] = args.beta
@@ -350,6 +449,10 @@ def create_trainer_config(args: argparse.Namespace) -> TrainerConfig:
         convergence_threshold=args.convergence_threshold,
         track_fairness=args.track_fairness,
         fairness_eval_freq=args.fairness_eval_freq,
+        task_type=args.task_type,
+        client_lr_scheduler=args.client_lr_scheduler,
+        cosine_decay_T_max=args.cosine_decay_T_max,
+        cosine_decay_eta_min=args.cosine_decay_eta_min,
         use_monitor=args.use_monitor,
         monitor_refresh_rate=args.monitor_refresh_rate,
         use_amp=args.use_amp,
@@ -401,7 +504,7 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info(f"Dataset loaded: {len(client_loaders)} clients")
     
     logger.info("Creating model...")
-    model = get_model(args.model, num_classes)
+    model = get_model(args.model, num_classes, args)
     model = model.to(args.device)
     logger.info(f"Model created: {args.model}")
     
@@ -446,11 +549,15 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
         logger.info(f"Convergence reached at round: {results['convergence_round']}")
     
     logger.info(f"Experiment completed. Results saved to {results_path}")
-    logger.info(f"Best accuracy: {results['best_accuracy']:.4f}")
+    primary_metric_name = results.get("primary_metric_name", "accuracy")
+    logger.info(f"Best {primary_metric_name}: {results['best_primary_metric']:.4f}")
     
     metadata.update({
         "status": "completed",
         "best_accuracy": results["best_accuracy"],
+        "best_perplexity": results.get("best_perplexity"),
+        "best_primary_metric": results.get("best_primary_metric"),
+        "primary_metric_name": primary_metric_name,
         "final_round": results["final_round"],
         "total_time": results["total_time"],
     })
@@ -468,6 +575,8 @@ def main():
         config = load_config(args.config)
         applied = apply_config_to_args(args, config)
         logger.info(f"Applied {applied} config entries from {args.config}")
+
+    resolve_dataset_defaults(args)
     
     if not torch.cuda.is_available() and args.device == "cuda":
         logger.warning("CUDA not available, using CPU")
@@ -487,7 +596,7 @@ def main():
     print(f"{'='*60}")
     print(f"Method: {args.method}")
     print(f"Dataset: {args.dataset}")
-    print(f"Best accuracy: {results['best_accuracy']:.4f}")
+    print(f"Best {results.get('primary_metric_name', 'accuracy')}: {results['best_primary_metric']:.4f}")
     print(f"Total rounds: {results['final_round']}")
     print(f"Total time: {results['total_time']:.2f}s")
     

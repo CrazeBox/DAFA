@@ -12,8 +12,8 @@ from pathlib import Path
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run phase-1 tuning experiments")
     parser.add_argument("--dataset", type=str, default="cifar10")
-    parser.add_argument("--alpha", type=float, default=0.5)
-    parser.add_argument("--num_rounds", type=int, default=50)
+    parser.add_argument("--alpha", type=float, default=0.1)
+    parser.add_argument("--num_rounds", type=int, default=100)
     parser.add_argument("--output_dir", type=str, default="results/phase1_tuning")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--num_repeats", type=int, default=1)

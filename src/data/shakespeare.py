@@ -22,6 +22,8 @@ class ShakespeareDataset(Dataset):
         train: bool = True,
         download: bool = True,
         seq_length: int = 80,
+        vocab_size: int = 80,
+        allow_synthetic_data: bool = False,
         transform: Optional[Callable] = None,
     ):
         """
@@ -37,11 +39,14 @@ class ShakespeareDataset(Dataset):
         self.root = Path(root)
         self.train = train
         self.seq_length = seq_length
+        self.vocab_size = vocab_size
+        self.allow_synthetic_data = allow_synthetic_data
         self.transform = transform
         
         self.data_dir = self.root / ("train" if train else "test")
         
-        self.vocab = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+        full_vocab = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+        self.vocab = full_vocab[:vocab_size]
         self.char_to_idx = {c: i for i, c in enumerate(self.vocab)}
         self.idx_to_char = {i: c for i, c in enumerate(self.vocab)}
         self.vocab_size = len(self.vocab)
@@ -79,8 +84,13 @@ class ShakespeareDataset(Dataset):
                     urllib.request.urlretrieve(url, all_data_path)
                     print(f"Downloaded {split} data")
                 except Exception as e:
-                    print(f"Failed to download {split} data: {e}")
-                    self._create_synthetic_data(split_dir)
+                    if self.allow_synthetic_data:
+                        print(f"Failed to download {split} data: {e}")
+                        self._create_synthetic_data(split_dir)
+                    else:
+                        raise RuntimeError(
+                            f"Failed to download Shakespeare {split} split and synthetic fallback is disabled: {e}"
+                        ) from e
     
     def _create_synthetic_data(self, split_dir: Path) -> None:
         """Create synthetic Shakespeare-like data for testing."""
@@ -111,9 +121,15 @@ class ShakespeareDataset(Dataset):
         all_data_path = self.data_dir / "all_data.json"
         
         if not all_data_path.exists():
-            print(f"Data file not found: {all_data_path}")
-            print("Creating synthetic data...")
-            self._create_synthetic_data(self.data_dir)
+            if self.allow_synthetic_data:
+                print(f"Data file not found: {all_data_path}")
+                print("Creating synthetic data...")
+                self._create_synthetic_data(self.data_dir)
+            else:
+                raise FileNotFoundError(
+                    f"Missing Shakespeare data file: {all_data_path}. "
+                    "Provide the real dataset or rerun with synthetic fallback enabled."
+                )
         
         with open(all_data_path, "r") as f:
             data = json.load(f)
@@ -171,8 +187,10 @@ class ShakespeareFederated:
         root: str = "data/shakespeare",
         num_clients: int = 100,
         seq_length: int = 80,
+        vocab_size: int = 80,
         seed: int = 42,
         download: bool = True,
+        allow_synthetic_data: bool = False,
         val_ratio: float = 0.1,
     ):
         """
@@ -189,6 +207,7 @@ class ShakespeareFederated:
         self.root = Path(root)
         self.num_clients = num_clients
         self.seq_length = seq_length
+        self.vocab_size = vocab_size
         self.seed = seed
         self.val_ratio = val_ratio
         self.rng = np.random.RandomState(seed)
@@ -198,6 +217,8 @@ class ShakespeareFederated:
             train=True,
             download=download,
             seq_length=seq_length,
+            vocab_size=vocab_size,
+            allow_synthetic_data=allow_synthetic_data,
         )
         
         self.test_dataset = ShakespeareDataset(
@@ -205,6 +226,8 @@ class ShakespeareFederated:
             train=False,
             download=download,
             seq_length=seq_length,
+            vocab_size=vocab_size,
+            allow_synthetic_data=allow_synthetic_data,
         )
         
         self._create_validation_set()
@@ -356,9 +379,11 @@ def get_shakespeare_loaders(
     root: str = "data/shakespeare",
     num_clients: int = 100,
     seq_length: int = 80,
+    vocab_size: int = 80,
     batch_size: int = 64,
     seed: int = 42,
     download: bool = True,
+    allow_synthetic_data: bool = False,
     num_workers: int = 0,
     lazy_init: bool = True,
     val_ratio: float = 0.1,
@@ -386,8 +411,10 @@ def get_shakespeare_loaders(
         root=root,
         num_clients=num_clients,
         seq_length=seq_length,
+        vocab_size=vocab_size,
         seed=seed,
         download=download,
+        allow_synthetic_data=allow_synthetic_data,
         val_ratio=val_ratio,
     )
     

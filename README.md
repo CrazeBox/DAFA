@@ -1,10 +1,15 @@
-# DAFA: Direction-Aware Federated Averaging
+# DAFA: Directionally Aligned Federated Aggregation
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/pytorch-2.0+-orange.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-PyTorch implementation of **DAFA (Direction-Aware Federated Averaging)** for federated learning with non-IID data.
+PyTorch implementation of **DAFA (Directionally Aligned Federated Aggregation)** for federated learning with non-IID data.
+
+The experiment entrypoints are aligned with the paper defaults:
+- `CIFAR-10`: `ResNet-18`, 100 clients, 10 sampled, `K=5`, batch size `32`, `T=200`
+- `FEMNIST`: `TwoLayerCNN`, 200 sampled clients, `K=10`, batch size `32`, `T=200`
+- `Shakespeare`: 2-layer `LSTM`, `hidden=256`, `embedding=200`, 100 sampled clients, `K=2`, batch size `32`, `T=200`
 
 ## Quick Start
 
@@ -77,13 +82,13 @@ python scripts/run_experiment.py \
 # Run full tuning (8 methods, ~2 days on RTX 3050)
 python scripts/run_phase1_tuning.py \
     --dataset cifar10 \
-    --alpha 0.5 \
-    --num_rounds 50
+    --alpha 0.1 \
+    --num_rounds 100
 
 # Quick tuning (faster)
 python scripts/run_phase1_tuning.py \
     --dataset cifar10 \
-    --alpha 0.5 \
+    --alpha 0.1 \
     --num_rounds 20 \
     --num_repeats 2
 ```

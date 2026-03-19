@@ -119,6 +119,9 @@ class DirWeightAggregator(BaseAggregator):
             update_tensor = self.get_update_tensor(update, global_params.device)
             aggregated_update += dir_weights[i] * update_tensor
         
+        self.last_aggregated_update = aggregated_update.detach().clone()
+        self.last_proxy_direction = proxy_direction.detach().clone()
+
         new_params = global_params + self.server_lr * aggregated_update
         self.set_model_params(global_model, new_params)
         

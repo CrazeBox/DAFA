@@ -139,7 +139,7 @@ class ShakespeareLSTM(nn.Module):
     def __init__(
         self,
         vocab_size: int = 80,
-        embedding_dim: int = 8,
+        embedding_dim: int = 200,
         hidden_size: int = 256,
         num_layers: int = 2,
         dropout: float = 0.5,

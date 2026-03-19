@@ -85,6 +85,9 @@ class SCAFFOLDAggregator(BaseAggregator):
             
             self.client_controls[client_id] = new_control.clone()
         
+        self.last_aggregated_update = delta_updates.detach().clone()
+        self.last_proxy_direction = delta_updates.detach().clone()
+
         new_params = global_params + self.server_lr * delta_updates
         self.set_model_params(global_model, new_params)
         

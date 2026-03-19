@@ -87,8 +87,12 @@ class FedAdamAggregator(BaseAggregator):
         v_hat = self.v / (1 - self.beta2 ** t)
         
         adaptive_lr = self.server_lr / (torch.sqrt(v_hat) + self.tau)
-        
-        new_params = global_params + adaptive_lr * m_hat
+        final_update = adaptive_lr * m_hat
+
+        self.last_aggregated_update = final_update.detach().clone()
+        self.last_proxy_direction = final_update.detach().clone()
+
+        new_params = global_params + final_update
         self.set_model_params(global_model, new_params)
         
         self.step()

@@ -15,6 +15,13 @@ import subprocess
 from pathlib import Path
 from typing import List, Tuple
 
+import pytest
+
+
+pytestmark = pytest.mark.skip(
+    reason="Environment verification script; run with `python tests/test_ubuntu_environment.py` instead of pytest."
+)
+
 IS_LINUX = platform.system() == "Linux"
 IS_WINDOWS = platform.system() == "Windows"
 

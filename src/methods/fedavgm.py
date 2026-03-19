@@ -68,6 +68,9 @@ class FedAvgMAggregator(BaseAggregator):
             aggregated_update += weights[i] * update_tensor
         
         self.velocity = self.server_momentum * self.velocity + (1 - self.server_momentum) * aggregated_update
+
+        self.last_aggregated_update = self.velocity.detach().clone()
+        self.last_proxy_direction = self.velocity.detach().clone()
         
         new_params = global_params + self.server_lr * self.velocity
         self.set_model_params(global_model, new_params)

@@ -31,11 +31,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 BASE_CONFIG = {
-    "num_rounds": 100,
+    "num_rounds": 200,
     "num_clients": 100,
     "clients_per_round": 10,
     "local_epochs": 5,
-    "batch_size": 64,
+    "batch_size": 32,
     "seed": 42,
     "device": "cuda",
     "eval_every": 10,
@@ -61,7 +61,7 @@ def get_model_for_dataset(dataset: str) -> str:
     """Get appropriate model for dataset."""
     model_map = {
         "cifar10": "resnet18",
-        "femnist": "cnn",
+        "femnist": "twolayer_cnn",
         "shakespeare": "lstm",
     }
     return model_map.get(dataset, "resnet18")
@@ -72,7 +72,7 @@ def get_lr_for_dataset(dataset: str) -> float:
     lr_map = {
         "cifar10": 0.01,
         "femnist": 0.01,
-        "shakespeare": 0.8,
+        "shakespeare": 0.01,
     }
     return lr_map.get(dataset, 0.01)
 

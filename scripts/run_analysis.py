@@ -65,6 +65,16 @@ def moving_average(values: List[float], window: int) -> List[float]:
     return result
 
 
+def get_primary_metric_name(results: Dict[str, Any]) -> str:
+    """Infer the primary metric stored in a results file."""
+    if results.get("primary_metric_name"):
+        return str(results["primary_metric_name"])
+    history = results.get("history", [])
+    if history and "perplexity" in history[0]:
+        return "perplexity"
+    return "accuracy"
+
+
 def load_results(path: str) -> Dict[str, Any]:
     """Load experiment results from file."""
     path = Path(path)
@@ -105,25 +115,29 @@ def analyze_single_experiment(
         return analysis
     
     rounds = [h.get("round", i) for i, h in enumerate(history)]
-    accuracies = [h.get("accuracy", 0) for h in history]
+    metric_name = get_primary_metric_name(results)
+    metric_values = [h.get(metric_name, 0) for h in history]
     losses = [h.get("loss", 0) for h in history]
     
     analysis["convergence"] = {
-        "final_accuracy": accuracies[-1] if accuracies else 0,
-        "best_accuracy": max(accuracies) if accuracies else 0,
+        "primary_metric_name": metric_name,
+        "final_primary_metric": metric_values[-1] if metric_values else 0,
+        "best_primary_metric": min(metric_values) if metric_name == "perplexity" else max(metric_values) if metric_values else 0,
         "final_loss": losses[-1] if losses else 0,
         "convergence_round": None,
     }
     
-    for i, acc in enumerate(accuracies):
-        if acc >= 0.95 * max(accuracies):
-            analysis["convergence"]["convergence_round"] = rounds[i]
-            break
+    if metric_values:
+        target = min(metric_values) * 1.05 if metric_name == "perplexity" else 0.95 * max(metric_values)
+        for i, value in enumerate(metric_values):
+            if (metric_name == "perplexity" and value <= target) or (metric_name != "perplexity" and value >= target):
+                analysis["convergence"]["convergence_round"] = rounds[i]
+                break
     
     analysis["training_stats"] = {
         "total_rounds": len(rounds),
-        "mean_accuracy": np.mean(accuracies),
-        "std_accuracy": np.std(accuracies),
+        f"mean_{metric_name}": np.mean(metric_values),
+        f"std_{metric_name}": np.std(metric_values),
         "mean_loss": np.mean(losses),
         "std_loss": np.std(losses),
     }
@@ -133,13 +147,13 @@ def analyze_single_experiment(
         output_dir.mkdir(parents=True, exist_ok=True)
         
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        smooth_acc = moving_average(accuracies, smooth_window)
+        smooth_metric = moving_average(metric_values, smooth_window)
         smooth_loss = moving_average(losses, smooth_window)
         
-        axes[0].plot(rounds, smooth_acc, "b-", linewidth=2)
+        axes[0].plot(rounds, smooth_metric, "b-", linewidth=2)
         axes[0].set_xlabel("Round")
-        axes[0].set_ylabel("Accuracy")
-        axes[0].set_title("Test Accuracy over Rounds")
+        axes[0].set_ylabel(metric_name.replace("_", " ").title())
+        axes[0].set_title(f"Test {metric_name.replace('_', ' ').title()} over Rounds")
         axes[0].grid(True, alpha=0.3)
         
         axes[1].plot(rounds, smooth_loss, "r-", linewidth=2)
@@ -171,21 +185,25 @@ def compare_experiments(
     }
     
     sns.set_theme(style=style, context="talk")
-    all_accuracies = []
+    metric_names = [get_primary_metric_name(results) for results in results_list]
+    common_metric_name = metric_names[0] if len(set(metric_names)) == 1 else "primary_metric"
+    all_metric_values = []
     all_losses = []
     
-    for results, name in zip(results_list, names):
+    for results, name, metric_name in zip(results_list, names, metric_names):
         history = results.get("history", [])
-        accuracies = [h.get("accuracy", 0) for h in history]
+        metric_values = [h.get(metric_name, 0) for h in history]
         losses = [h.get("loss", 0) for h in history]
         
-        all_accuracies.append(accuracies)
+        all_metric_values.append(metric_values)
         all_losses.append(losses)
         
+        best_value = min(metric_values) if metric_name == "perplexity" else max(metric_values) if metric_values else 0
         comparison["metrics"][name] = {
-            "best_accuracy": max(accuracies) if accuracies else 0,
-            "final_accuracy": accuracies[-1] if accuracies else 0,
-            "mean_accuracy": np.mean(accuracies) if accuracies else 0,
+            "primary_metric_name": metric_name,
+            "best_primary_metric": best_value,
+            "final_primary_metric": metric_values[-1] if metric_values else 0,
+            "mean_primary_metric": np.mean(metric_values) if metric_values else 0,
         }
     
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -193,13 +211,13 @@ def compare_experiments(
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     palette = sns.color_palette("tab10", len(names))
     
-    for idx, (accuracies, name) in enumerate(zip(all_accuracies, names)):
-        rounds = list(range(1, len(accuracies) + 1))
-        axes[0].plot(rounds, moving_average(accuracies, smooth_window), linewidth=2, label=name, color=palette[idx])
+    for idx, (metric_values, name) in enumerate(zip(all_metric_values, names)):
+        rounds = list(range(1, len(metric_values) + 1))
+        axes[0].plot(rounds, moving_average(metric_values, smooth_window), linewidth=2, label=name, color=palette[idx])
     
     axes[0].set_xlabel("Round")
-    axes[0].set_ylabel("Accuracy")
-    axes[0].set_title("Accuracy Comparison")
+    axes[0].set_ylabel(common_metric_name.replace("_", " ").title())
+    axes[0].set_title(f"{common_metric_name.replace('_', ' ').title()} Comparison")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
     
@@ -219,18 +237,19 @@ def compare_experiments(
     
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    best_accs = [comparison["metrics"][name]["best_accuracy"] for name in names]
-    bars = ax.bar(names, best_accs, color=sns.color_palette("husl", len(names)))
+    best_values = [comparison["metrics"][name]["best_primary_metric"] for name in names]
+    bars = ax.bar(names, best_values, color=sns.color_palette("husl", len(names)))
     
-    ax.set_ylabel("Best Accuracy")
-    ax.set_title("Best Accuracy Comparison")
-    ax.set_ylim([0, 1])
+    ax.set_ylabel(f"Best {common_metric_name.replace('_', ' ').title()}")
+    ax.set_title(f"Best {common_metric_name.replace('_', ' ').title()} Comparison")
+    if common_metric_name != "perplexity":
+        ax.set_ylim([0, 1])
     
-    for bar, acc in zip(bars, best_accs):
+    for bar, value in zip(bars, best_values):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.01,
-            f"{acc:.4f}",
+            f"{value:.4f}",
             ha="center",
             va="bottom",
         )
@@ -240,10 +259,12 @@ def compare_experiments(
     plt.close()
     
     metrics_csv = output_dir / "comparison_metrics.csv"
-    lines = ["method,best_accuracy,final_accuracy,mean_accuracy"]
+    lines = ["method,primary_metric_name,best_primary_metric,final_primary_metric,mean_primary_metric"]
     for name in names:
         m = comparison["metrics"][name]
-        lines.append(f"{name},{m['best_accuracy']:.6f},{m['final_accuracy']:.6f},{m['mean_accuracy']:.6f}")
+        lines.append(
+            f"{name},{m['primary_metric_name']},{m['best_primary_metric']:.6f},{m['final_primary_metric']:.6f},{m['mean_primary_metric']:.6f}"
+        )
     metrics_csv.write_text("\n".join(lines), encoding="utf-8")
     
     return comparison
@@ -266,8 +287,9 @@ def generate_report(
         report_lines.extend([
             "CONVERGENCE ANALYSIS",
             "-" * 40,
-            f"  Final Accuracy: {conv.get('final_accuracy', 0):.4f}",
-            f"  Best Accuracy: {conv.get('best_accuracy', 0):.4f}",
+            f"  Primary Metric: {conv.get('primary_metric_name', 'accuracy')}",
+            f"  Final Value: {conv.get('final_primary_metric', 0):.4f}",
+            f"  Best Value: {conv.get('best_primary_metric', 0):.4f}",
             f"  Final Loss: {conv.get('final_loss', 0):.4f}",
             f"  Convergence Round: {conv.get('convergence_round', 'N/A')}",
             "",
@@ -275,12 +297,13 @@ def generate_report(
     
     if "training_stats" in analysis:
         stats = analysis["training_stats"]
+        primary_metric_name = analysis.get("convergence", {}).get("primary_metric_name", "accuracy")
         report_lines.extend([
             "TRAINING STATISTICS",
             "-" * 40,
             f"  Total Rounds: {stats.get('total_rounds', 0)}",
-            f"  Mean Accuracy: {stats.get('mean_accuracy', 0):.4f}",
-            f"  Std Accuracy: {stats.get('std_accuracy', 0):.4f}",
+            f"  Mean {primary_metric_name.title()}: {stats.get(f'mean_{primary_metric_name}', 0):.4f}",
+            f"  Std {primary_metric_name.title()}: {stats.get(f'std_{primary_metric_name}', 0):.4f}",
             f"  Mean Loss: {stats.get('mean_loss', 0):.4f}",
             f"  Std Loss: {stats.get('std_loss', 0):.4f}",
             "",
@@ -296,8 +319,9 @@ def generate_report(
             metrics = analysis["metrics"].get(method, {})
             report_lines.extend([
                 f"  {method}:",
-                f"    Best Accuracy: {metrics.get('best_accuracy', 0):.4f}",
-                f"    Final Accuracy: {metrics.get('final_accuracy', 0):.4f}",
+                f"    Metric: {metrics.get('primary_metric_name', 'accuracy')}",
+                f"    Best Value: {metrics.get('best_primary_metric', 0):.4f}",
+                f"    Final Value: {metrics.get('final_primary_metric', 0):.4f}",
             ])
         
         report_lines.append("")

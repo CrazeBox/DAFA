@@ -73,6 +73,20 @@ def mean_std(values: List[float]) -> Dict[str, float]:
     return {"mean": float(statistics.mean(values)), "std": float(statistics.stdev(values))}
 
 
+def get_primary_metric_name(result: Dict[str, Any], dataset: str) -> str:
+    """Return the primary metric name for a dataset/result pair."""
+    return str(result.get("primary_metric_name") or ("perplexity" if dataset == "shakespeare" else "accuracy"))
+
+
+def get_primary_metric_value(result: Dict[str, Any], dataset: str) -> float:
+    """Extract the best primary metric from a result file."""
+    metric_name = get_primary_metric_name(result, dataset)
+    if metric_name == "perplexity":
+        value = result.get("best_perplexity")
+        return float(value) if value is not None else float("inf")
+    return float(result.get("best_accuracy", 0.0))
+
+
 def run_experiment(
     output_dir: Path,
     method: str,
@@ -187,7 +201,7 @@ def _latest_bottom10(history: List[Dict[str, Any]]) -> float:
 
 
 def run_stage2(base_dir: Path, seeds: List[int], num_rounds: int, device: str, dry_run: bool, stage1_best: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    stage_dir = base_dir / "stage2_core"
+    stage_dir = base_dir / "stage2_comparison"
     stage_dir.mkdir(parents=True, exist_ok=True)
     scenarios = [("cifar10", 0.5), ("cifar10", 0.1), ("femnist", 0.5), ("shakespeare", 0.5)]
     methods = ["fedavg", "fedprox", "scaffold", "fednova", "fedavgm", "fedadam", "dir_weight", "dafa"]
@@ -198,6 +212,7 @@ def run_stage2(base_dir: Path, seeds: List[int], num_rounds: int, device: str, d
             cfg = dict(best_cfg.get(method, {}))
             scores: List[float] = []
             bottoms: List[float] = []
+            metric_name = "accuracy" if dataset != "shakespeare" else "perplexity"
             for seed in seeds:
                 exp_dir = stage_dir / f"{dataset}_a{alpha}_{method}_seed{seed}"
                 code, result_path = run_experiment(
@@ -213,21 +228,24 @@ def run_stage2(base_dir: Path, seeds: List[int], num_rounds: int, device: str, d
                 )
                 if code == 0 and result_path:
                     data = load_json(result_path)
-                    scores.append(float(data.get("best_accuracy", 0.0)))
+                    metric_name = get_primary_metric_name(data, dataset)
+                    scores.append(get_primary_metric_value(data, dataset))
                     bottoms.append(_latest_bottom10(data.get("history", [])))
-            records.append(
-                {
-                    "dataset": dataset,
-                    "alpha": alpha,
-                    "method": method,
-                    "accuracy": mean_std(scores),
-                    "bottom_10_accuracy": mean_std(bottoms),
-                    "runs": len(scores),
-                }
-            )
+            record = {
+                "dataset": dataset,
+                "alpha": alpha,
+                "method": method,
+                "primary_metric_name": metric_name,
+                "primary_metric": mean_std(scores),
+                "bottom_10_accuracy": mean_std(bottoms),
+                "runs": len(scores),
+            }
+            record[metric_name] = record["primary_metric"]
+            records.append(record)
     out = {"records": records}
-    with open(stage_dir / "stage2_table1_summary.json", "w", encoding="utf-8") as f:
-        json.dump(out, f, indent=2)
+    for name in ["stage2_summary.json", "stage2_table1_summary.json"]:
+        with open(stage_dir / name, "w", encoding="utf-8") as f:
+            json.dump(out, f, indent=2)
     return out
 
 
@@ -316,7 +334,7 @@ def run_stage4(base_dir: Path, seeds: List[int], num_rounds: int, device: str, d
 
 
 def run_stage5(base_dir: Path, seeds: List[int], num_rounds: int, device: str, dry_run: bool) -> Dict[str, Any]:
-    stage_dir = base_dir / "stage5_extended"
+    stage_dir = base_dir / "stage5_extension"
     stage_dir.mkdir(parents=True, exist_ok=True)
     records: List[Dict[str, Any]] = []
 
@@ -327,7 +345,7 @@ def run_stage5(base_dir: Path, seeds: List[int], num_rounds: int, device: str, d
             method="dafa",
             dataset="cifar10",
             seed=seed,
-            num_rounds=max(num_rounds, 150),
+            num_rounds=max(num_rounds, 200),
             device=device,
             alpha=0.1,
             extra_args={},
@@ -442,21 +460,21 @@ def main() -> None:
     if "3" in selected:
         started_at = datetime.now().isoformat()
         try:
-            summary["stage3"] = run_stage3(base_dir, seeds, max(args.num_rounds, 100), args.device, args.dry_run)
+            summary["stage3"] = run_stage3(base_dir, seeds, max(args.num_rounds, 200), args.device, args.dry_run)
             stage_status["stage3"] = {"started_at": started_at, "finished_at": datetime.now().isoformat(), "status": "completed"}
         except Exception as exc:
             stage_status["stage3"] = {"started_at": started_at, "finished_at": datetime.now().isoformat(), "status": "failed", "error": str(exc)}
     if "4" in selected:
         started_at = datetime.now().isoformat()
         try:
-            summary["stage4"] = run_stage4(base_dir, seeds, max(args.num_rounds, 100), args.device, args.dry_run)
+            summary["stage4"] = run_stage4(base_dir, seeds, max(args.num_rounds, 200), args.device, args.dry_run)
             stage_status["stage4"] = {"started_at": started_at, "finished_at": datetime.now().isoformat(), "status": "completed"}
         except Exception as exc:
             stage_status["stage4"] = {"started_at": started_at, "finished_at": datetime.now().isoformat(), "status": "failed", "error": str(exc)}
     if "5" in selected:
         started_at = datetime.now().isoformat()
         try:
-            summary["stage5"] = run_stage5(base_dir, seeds, max(args.num_rounds, 100), args.device, args.dry_run)
+            summary["stage5"] = run_stage5(base_dir, seeds, max(args.num_rounds, 200), args.device, args.dry_run)
             stage_status["stage5"] = {"started_at": started_at, "finished_at": datetime.now().isoformat(), "status": "completed"}
         except Exception as exc:
             stage_status["stage5"] = {"started_at": started_at, "finished_at": datetime.now().isoformat(), "status": "failed", "error": str(exc)}
