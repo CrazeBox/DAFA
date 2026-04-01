@@ -9,9 +9,10 @@ from torchvision import transforms
 from typing import Dict, List, Optional, Tuple, Callable
 from pathlib import Path
 from PIL import Image
-import urllib.request
 import zipfile
 import io
+
+from .download_utils import download_url_with_progress
 
 
 FEMNIST_URL = "https://raw.githubusercontent.com/tao-shen/FEMNIST_pytorch/master/data/femnist/"
@@ -78,7 +79,7 @@ class FEMNISTDataset(Dataset):
             if not all_data_path.exists():
                 url = f"{FEMNIST_URL}{split}/all_data.json"
                 try:
-                    urllib.request.urlretrieve(url, all_data_path)
+                    download_url_with_progress(url, all_data_path)
                     print(f"Downloaded {split} data")
                 except Exception as e:
                     if self.allow_synthetic_data:

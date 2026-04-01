@@ -1,36 +1,216 @@
-# DAFA 复现指南
+# DAFA Linux Reproduction Guide
 
-本指南对应当前仓库实现，目标是复现 `NeurlPS_Paper4.pdf` 中的核心实验，并与 `EXPERIMENT_DESIGN.md` 保持一致。
+This guide is written for a clean Linux environment. It assumes nothing about the author's local workspace and is intended for open-source users who want to reproduce the DAFA experiments from scratch.
 
-## 1. 论文默认实验设置
+## 1. Target outcome
 
-| 数据集 | 模型 | 总客户端/采样客户端 | 本地轮数 K | Batch Size | 通信轮数 T | 主指标 |
-| --- | --- | --- | --- | --- | --- | --- |
-| CIFAR-10 | ResNet-18 | 100 / 10 | 5 | 32 | 200 | Accuracy |
-| FEMNIST | TwoLayerCNN | 自然分区 / 200 | 10 | 32 | 200 | Accuracy |
-| Shakespeare | 2-layer LSTM, hidden=256, embedding=200 | 自然分区 / 100 | 2 | 32 | 200 | Perplexity |
+By following this guide, a new user should be able to:
 
-当前 `scripts/run_experiment.py` 已内置这些默认值。只要指定 `--dataset`，其余关键参数会自动补齐；如果你手动传参，手动值优先。
+- create the environment
+- download the required datasets without manually copying dataset links
+- run the staged experiment pipeline
+- regenerate the main summaries under `results/five_stages/`
+- regenerate summary tables and plots from result files
 
-## 2. 环境与数据
+## 2. Recommended machine
 
-### 2.1 环境
+- OS: Ubuntu 20.04+ or another recent Linux distribution
+- Python: 3.10 or 3.11
+- GPU: NVIDIA CUDA GPU recommended
+- Disk: at least `20 GB` free
+- RAM: at least `16 GB`
 
-推荐 Linux / WSL。项目自带环境脚本：
+CPU-only execution is possible for smoke tests, but full runs will be slow.
+
+## 3. Clone and set up
 
 ```bash
+git clone <your-public-repo-url>
+cd DAFA
 bash scripts/setup_env.sh --profile basic
+source venv/bin/activate
 ```
 
-### 2.2 数据准备
+Quick verification:
 
-- `CIFAR-10` 支持自动下载。
-- `FEMNIST` 和 `Shakespeare` 需要准备 `data/<dataset>/{train,test}/all_data.json`。
-- 当前默认不会静默回退到 synthetic data；若只想做调试，可显式传 `--allow_synthetic_data true`。
+```bash
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+python tests/test_ubuntu_environment.py
+```
 
-## 3. 单次实验
+Optional unit tests:
 
-### 3.1 CIFAR-10
+```bash
+pytest tests/test_all.py -v
+```
+
+## 4. Download datasets
+
+The public release should use the built-in downloader instead of asking users to fetch links manually.
+
+Download all required datasets:
+
+```bash
+python scripts/download_datasets.py --datasets cifar10,femnist,shakespeare
+```
+
+Download only a subset:
+
+```bash
+python scripts/download_datasets.py --datasets femnist,shakespeare
+```
+
+Notes:
+
+- `CIFAR-10` is downloaded through `torchvision`.
+- `FEMNIST` and `Shakespeare` are downloaded into:
+  - `data/femnist/train/all_data.json`
+  - `data/femnist/test/all_data.json`
+  - `data/shakespeare/train/all_data.json`
+  - `data/shakespeare/test/all_data.json`
+- the downloader shows terminal progress bars
+- `--allow_synthetic_data` is only for debugging and must not be used for formal reproduction
+- if the default public mirror for `FEMNIST/Shakespeare` changes, pass an explicit mirror:
+
+```bash
+python scripts/download_datasets.py \
+  --datasets femnist,shakespeare \
+  --femnist_base_url <stable-femnist-mirror> \
+  --shakespeare_base_url <stable-shakespeare-mirror>
+```
+
+Verify the files:
+
+```bash
+find data -maxdepth 3 -type f | sort
+```
+
+## 5. Smoke test before long runs
+
+Run a very short CIFAR-10 experiment first:
+
+```bash
+python scripts/run_experiment.py \
+  --method fedavg \
+  --dataset cifar10 \
+  --alpha 0.1 \
+  --num_rounds 5 \
+  --device cuda
+```
+
+Expected artifacts:
+
+- `results/.../config.json`
+- `results/.../metadata.json`
+- `results/.../results.json`
+- `results/.../experiment.log`
+
+If this step fails, do not proceed to the full staged pipeline.
+
+## 6. Full staged pipeline
+
+### Stage 1: tuning
+
+```bash
+python scripts/run_five_stages.py \
+  --stages 1 \
+  --device cuda \
+  --num_rounds 100 \
+  --seeds 42,123,456
+```
+
+Expected files:
+
+- `results/five_stages/stage1_tuning/best_hyperparams_generated.yaml`
+- `results/five_stages/stage1_tuning/stage1_summary.json`
+
+### Stage 2: main comparison
+
+```bash
+python scripts/run_five_stages.py \
+  --stages 2 \
+  --device cuda \
+  --num_rounds 200 \
+  --seeds 42,123,456,777,1024
+```
+
+Expected file:
+
+- `results/five_stages/stage2_comparison/stage2_summary.json`
+
+### Stage 3: mechanism analysis
+
+```bash
+python scripts/run_five_stages.py \
+  --stages 3 \
+  --device cuda \
+  --num_rounds 200 \
+  --seeds 42,123,456,777,1024
+```
+
+Expected file:
+
+- `results/five_stages/stage3_mechanism/stage3_summary.json`
+
+### Stage 4: ablations
+
+```bash
+python scripts/run_five_stages.py \
+  --stages 4 \
+  --device cuda \
+  --num_rounds 200 \
+  --seeds 42,123,456,777,1024
+```
+
+Expected file:
+
+- `results/five_stages/stage4_ablation/stage4_summary.json`
+
+### Stage 5: robustness and extensions
+
+```bash
+python scripts/run_five_stages.py \
+  --stages 5 \
+  --device cuda \
+  --num_rounds 200 \
+  --seeds 42,123,456,777,1024
+```
+
+Expected file:
+
+- `results/five_stages/stage5_extension/stage5_summary.json`
+
+## 7. Summaries and plots
+
+Generate summarized run tables:
+
+```bash
+python scripts/analyze_results.py select-best \
+  --results_root results \
+  --output_dir results/summary
+```
+
+Generate plots from the summary:
+
+```bash
+python scripts/analyze_results.py plot \
+  --best_runs results/summary/best_runs.json \
+  --output_dir results/summary/plots \
+  --format pdf
+```
+
+Compare a small set of completed runs directly:
+
+```bash
+python scripts/analyze_results.py compare \
+  --inputs results/run_a results/run_b \
+  --output_dir results/compare \
+  --format png
+```
+
+## 8. Single-run commands
+
+### CIFAR-10
 
 ```bash
 python scripts/run_experiment.py \
@@ -40,7 +220,7 @@ python scripts/run_experiment.py \
   --device cuda
 ```
 
-### 3.2 FEMNIST
+### FEMNIST
 
 ```bash
 python scripts/run_experiment.py \
@@ -49,7 +229,7 @@ python scripts/run_experiment.py \
   --device cuda
 ```
 
-### 3.3 Shakespeare
+### Shakespeare
 
 ```bash
 python scripts/run_experiment.py \
@@ -58,95 +238,38 @@ python scripts/run_experiment.py \
   --device cuda
 ```
 
-说明：
-- `Shakespeare` 的主指标是 `perplexity`，结果文件中会同时保存 `accuracy` 和 `perplexity`。
-- `dsnr` 现在优先记录论文定义下、基于小验证子集估计的 centralized DSNR；若验证集不可用，则退回经验 SNR 代理。
+## 9. Result layout
 
-## 4. 五阶段实验
-
-### Stage 1: 调参
-
-```bash
-python scripts/run_five_stages.py --stages 1 --device cuda --num_rounds 100 --seeds 42,123,456
-```
-
-输出：
-- `results/five_stages/stage1_tuning/best_hyperparams_generated.yaml`
-- `results/five_stages/stage1_tuning/stage1_summary.json`
-
-### Stage 2: 主表
-
-```bash
-python scripts/run_five_stages.py --stages 2 --device cuda
-```
-
-输出：
-- `results/five_stages/stage2_comparison/stage2_summary.json`
-
-说明：
-- `CIFAR-10/FEMNIST` 汇总 `accuracy`
-- `Shakespeare` 汇总 `perplexity`
-
-### Stage 3: 机制分析
-
-```bash
-python scripts/run_five_stages.py --stages 3 --device cuda
-```
-
-输出：
-- `results/five_stages/stage3_mechanism/stage3_summary.json`
-
-### Stage 4: 消融
-
-```bash
-python scripts/run_five_stages.py --stages 4 --device cuda
-```
-
-输出：
-- `results/five_stages/stage4_ablation/stage4_summary.json`
-
-### Stage 5: 扩展实验
-
-```bash
-python scripts/run_five_stages.py --stages 5 --device cuda
-```
-
-输出：
-- `results/five_stages/stage5_extension/stage5_summary.json`
-
-## 5. 结果目录
-
-单次实验默认保存在：
+Single runs are saved under:
 
 ```text
 results/<run_group>/<dataset>_<method>_seed<seed>_<timestamp>/
 ```
 
-关键文件：
-- `config.json`: 实际运行参数
-- `metadata.json`: 运行状态与摘要
-- `results.json`: 训练历史和汇总指标
-- `experiment.log`: 日志
-- `checkpoints/`: 检查点
+Key files:
 
-## 6. 测试
+- `config.json`
+- `metadata.json`
+- `results.json`
+- `experiment.log`
+- `checkpoints/`
 
-### 6.1 单元测试
+The staged pipeline writes into:
 
-```bash
-pytest tests/test_all.py -v
+```text
+results/five_stages/
 ```
 
-### 6.2 环境检查脚本
+## 10. Important caveat for open-source claims
 
-`tests/test_ubuntu_environment.py` 是脚本，不是 pytest 用例：
+This repo already supports the staged pipeline and dataset bootstrap, but the current codebase still has some gaps relative to the exact paper algorithm and metrics described in `NeurlPS_Paper22.pdf`.
 
-```bash
-python tests/test_ubuntu_environment.py
-```
+In particular, before claiming "full paper reproduction", verify the status of:
 
-## 7. 已知边界
+- DAFA warm-up
+- EMA-based adaptive clipping and soft scaling
+- centralized DSNR using a validation gradient proxy
+- exact plotting scripts for all final paper figures
+- a stable public mirror for `FEMNIST/Shakespeare` JSON files or an officially maintained generation script
 
-- `FEMNIST/Shakespeare` 没有真实数据时，synthetic fallback 会污染实验结论。
-- `run_analysis.py` 对 `Shakespeare` 已可读取 `perplexity`，但更复杂的论文图表仍建议直接读取 `results.json` 二次分析。
-- 评审关心的 fairness 指标 `bottom_10_accuracy` 主要适用于分类数据集；在 `Shakespeare` 上仅作为次要参考，不作为主表指标。
+`EXPERIMENT_DESIGN.md` is the source of truth for those release-readiness gaps.

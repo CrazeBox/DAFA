@@ -1,5 +1,5 @@
 # DAFA Dependencies
-# Python 3.8+ required
+# Python 3.10+ required
 
 # Core
 numpy>=1.21.0

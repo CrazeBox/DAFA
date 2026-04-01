@@ -36,10 +36,10 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 
-# Data (large files)
-data/cifar10/cifar-10-*
-data/femnist/femnist_*
-data/shakespeare/shakespeare_*
+# Data (local runtime assets)
+data/**
+!data/
+!data/README.md
 *.tar.gz
 *.zip
 
@@ -74,9 +74,9 @@ htmlcov/
 .pytest_cache/
 
 # Private files (not for public repo)
-NeurlPS_Paper4.pdf
+NeurlPS_Paper*.pdf
+review*.txt
 论文评审.txt
-EXPERIMENT_DESIGN.md
 Opus.md
 
 # External dependencies

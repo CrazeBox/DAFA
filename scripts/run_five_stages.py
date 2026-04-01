@@ -286,12 +286,14 @@ def run_stage3(base_dir: Path, seeds: List[int], num_rounds: int, device: str, d
     if result_dirs:
         cmd = [
             sys.executable,
-            str(ROOT / "scripts" / "run_analysis.py"),
-            "--compare",
+            str(ROOT / "scripts" / "analyze_results.py"),
+            "compare",
+            "--inputs",
             *[str(x) for x in result_dirs[: min(8, len(result_dirs))]],
             "--output_dir",
             str(stage_dir / "analysis"),
-            "--plot",
+            "--format",
+            "png",
         ]
         run_cmd(cmd, dry_run=dry_run)
     out = {"dafa_dsnr_corr_mean": mean_std(dsnr_corr)}

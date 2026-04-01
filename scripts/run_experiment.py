@@ -18,28 +18,8 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import platform
 
-import torch
-import numpy as np
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.data.cifar10 import get_cifar10_loaders
-from src.data.femnist import get_femnist_loaders
-from src.data.shakespeare import get_shakespeare_loaders
-from src.models.resnet import ResNet18
-from src.models.cnn import TwoLayerCNN, SimpleCNN
-from src.models.lstm import ShakespeareLSTM
-from src.methods.fedavg import FedAvgAggregator, FedAvgConfig
-from src.methods.fedprox import FedProxAggregator, FedProxConfig
-from src.methods.scaffold import SCAFFOLDAggregator, SCAFFOLDConfig
-from src.methods.fednova import FedNovaAggregator, FedNovaConfig
-from src.methods.fedavgm import FedAvgMAggregator, FedAvgMConfig
-from src.methods.fedadam import FedAdamAggregator, FedAdamConfig
-from src.methods.dafa import DAFAAggregator, DAFAConfig
-from src.methods.dir_weight import DirWeightAggregator, DirWeightConfig
-from src.core.trainer import FederatedTrainer, TrainerConfig
-from src.utils.seed import set_seed
 from src.utils.logger import get_logger, setup_logger
 
 
@@ -47,6 +27,8 @@ logger = get_logger(__name__)
 
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
+DATASET_NAMES = ("cifar10", "femnist", "shakespeare")
+METHOD_NAMES = ("fedavg", "fedprox", "scaffold", "fednova", "fedavgm", "fedadam", "dafa", "dir_weight")
 
 
 def parse_bool(value: str) -> bool:
@@ -68,12 +50,6 @@ def _collect_config_values(config_obj: Any, out: Dict[str, Any]) -> None:
                 _collect_config_values(value, out)
             else:
                 out[key] = value
-
-DATASET_LOADERS = {
-    "cifar10": get_cifar10_loaders,
-    "femnist": get_femnist_loaders,
-    "shakespeare": get_shakespeare_loaders,
-}
 
 DATASET_PROFILES: Dict[str, Dict[str, Any]] = {
     "cifar10": {
@@ -115,23 +91,60 @@ DATASET_PROFILES: Dict[str, Dict[str, Any]] = {
     },
 }
 
-MODEL_CREATORS = {
-    "resnet18": lambda num_classes: ResNet18(num_classes=num_classes),
-    "cnn": lambda num_classes: SimpleCNN(num_classes=num_classes),
-    "twolayer_cnn": lambda num_classes: TwoLayerCNN(num_classes=num_classes),
-    "lstm": lambda vocab_size: ShakespeareLSTM(vocab_size=vocab_size),
-}
+RUNTIME: Dict[str, Any] = {}
 
-AGGREGATOR_CREATORS = {
-    "fedavg": lambda config: FedAvgAggregator(FedAvgConfig(**config)),
-    "fedprox": lambda config: FedProxAggregator(FedProxConfig(**config)),
-    "scaffold": lambda config: SCAFFOLDAggregator(SCAFFOLDConfig(**config)),
-    "fednova": lambda config: FedNovaAggregator(FedNovaConfig(**config)),
-    "fedavgm": lambda config: FedAvgMAggregator(FedAvgMConfig(**config)),
-    "fedadam": lambda config: FedAdamAggregator(FedAdamConfig(**config)),
-    "dafa": lambda config: DAFAAggregator(DAFAConfig(**config)),
-    "dir_weight": lambda config: DirWeightAggregator(DirWeightConfig(**config)),
-}
+
+def ensure_runtime_imports() -> None:
+    """Import training dependencies lazily so CLI help works without torch."""
+    global RUNTIME
+    if RUNTIME:
+        return
+
+    import torch
+
+    from src.data.cifar10 import get_cifar10_loaders
+    from src.data.femnist import get_femnist_loaders
+    from src.data.shakespeare import get_shakespeare_loaders
+    from src.models.resnet import ResNet18
+    from src.models.cnn import TwoLayerCNN, SimpleCNN
+    from src.models.lstm import ShakespeareLSTM
+    from src.methods.fedavg import FedAvgAggregator, FedAvgConfig
+    from src.methods.fedprox import FedProxAggregator, FedProxConfig
+    from src.methods.scaffold import SCAFFOLDAggregator, SCAFFOLDConfig
+    from src.methods.fednova import FedNovaAggregator, FedNovaConfig
+    from src.methods.fedavgm import FedAvgMAggregator, FedAvgMConfig
+    from src.methods.fedadam import FedAdamAggregator, FedAdamConfig
+    from src.methods.dafa import DAFAAggregator, DAFAConfig
+    from src.methods.dir_weight import DirWeightAggregator, DirWeightConfig
+    from src.core.trainer import FederatedTrainer, TrainerConfig
+    from src.utils.seed import set_seed
+
+    RUNTIME = {
+        "torch": torch,
+        "get_cifar10_loaders": get_cifar10_loaders,
+        "get_femnist_loaders": get_femnist_loaders,
+        "get_shakespeare_loaders": get_shakespeare_loaders,
+        "ShakespeareLSTM": ShakespeareLSTM,
+        "FederatedTrainer": FederatedTrainer,
+        "TrainerConfig": TrainerConfig,
+        "set_seed": set_seed,
+        "MODEL_CREATORS": {
+            "resnet18": lambda num_classes: ResNet18(num_classes=num_classes),
+            "cnn": lambda num_classes: SimpleCNN(num_classes=num_classes),
+            "twolayer_cnn": lambda num_classes: TwoLayerCNN(num_classes=num_classes),
+            "lstm": lambda vocab_size: ShakespeareLSTM(vocab_size=vocab_size),
+        },
+        "AGGREGATOR_CREATORS": {
+            "fedavg": lambda config: FedAvgAggregator(FedAvgConfig(**config)),
+            "fedprox": lambda config: FedProxAggregator(FedProxConfig(**config)),
+            "scaffold": lambda config: SCAFFOLDAggregator(SCAFFOLDConfig(**config)),
+            "fednova": lambda config: FedNovaAggregator(FedNovaConfig(**config)),
+            "fedavgm": lambda config: FedAvgMAggregator(FedAvgMConfig(**config)),
+            "fedadam": lambda config: FedAdamAggregator(FedAdamConfig(**config)),
+            "dafa": lambda config: DAFAAggregator(DAFAConfig(**config)),
+            "dir_weight": lambda config: DirWeightAggregator(DirWeightConfig(**config)),
+        },
+    }
 
 
 def parse_args():
@@ -140,10 +153,10 @@ def parse_args():
     
     parser.add_argument("--config", type=str, help="Path to experiment config file")
     parser.add_argument("--method", type=str, default="fedavg",
-                       choices=list(AGGREGATOR_CREATORS.keys()),
+                       choices=list(METHOD_NAMES),
                        help="Aggregation method")
     parser.add_argument("--dataset", type=str, default="cifar10",
-                       choices=list(DATASET_LOADERS.keys()),
+                       choices=list(DATASET_NAMES),
                        help="Dataset name")
     parser.add_argument("--model", type=str, default=None,
                        help="Model architecture")
@@ -326,6 +339,7 @@ def get_default_data_dir() -> Path:
 
 def get_dataset(args: argparse.Namespace) -> tuple:
     """Get dataset loaders based on arguments."""
+    ensure_runtime_imports()
     dataset_name = args.dataset
     
     if args.data_root:
@@ -335,7 +349,7 @@ def get_dataset(args: argparse.Namespace) -> tuple:
     
     if dataset_name == "cifar10":
         cifar10_root = data_dir if "cifar10" in str(data_dir) else data_dir / "cifar10"
-        client_loaders, val_loader, test_loader, data_manager = get_cifar10_loaders(
+        client_loaders, val_loader, test_loader, data_manager = RUNTIME["get_cifar10_loaders"](
             root=str(cifar10_root),
             num_clients=args.num_clients,
             alpha=args.alpha,
@@ -347,7 +361,7 @@ def get_dataset(args: argparse.Namespace) -> tuple:
         num_classes = 10
     elif dataset_name == "femnist":
         femnist_root = data_dir if "femnist" in str(data_dir) else data_dir / "femnist"
-        client_loaders, val_loader, test_loader, data_manager = get_femnist_loaders(
+        client_loaders, val_loader, test_loader, data_manager = RUNTIME["get_femnist_loaders"](
             root=str(femnist_root),
             num_clients=args.num_clients,
             batch_size=args.batch_size,
@@ -359,7 +373,7 @@ def get_dataset(args: argparse.Namespace) -> tuple:
         num_classes = 62
     elif dataset_name == "shakespeare":
         shakespeare_root = data_dir if "shakespeare" in str(data_dir) else data_dir / "shakespeare"
-        client_loaders, val_loader, test_loader, data_manager = get_shakespeare_loaders(
+        client_loaders, val_loader, test_loader, data_manager = RUNTIME["get_shakespeare_loaders"](
             root=str(shakespeare_root),
             num_clients=args.num_clients,
             seq_length=args.seq_length,
@@ -376,24 +390,27 @@ def get_dataset(args: argparse.Namespace) -> tuple:
     return client_loaders, val_loader, test_loader, num_classes
 
 
-def get_model(model_name: str, num_classes: int, args: argparse.Namespace) -> torch.nn.Module:
+def get_model(model_name: str, num_classes: int, args: argparse.Namespace):
     """Get model based on name and number of classes."""
-    if model_name not in MODEL_CREATORS:
+    ensure_runtime_imports()
+    model_creators = RUNTIME["MODEL_CREATORS"]
+    if model_name not in model_creators:
         raise ValueError(f"Unknown model: {model_name}")
 
     if model_name == "lstm":
-        return ShakespeareLSTM(
+        return RUNTIME["ShakespeareLSTM"](
             vocab_size=num_classes,
             embedding_dim=args.embedding_dim,
             hidden_size=args.hidden_size,
             num_layers=args.num_layers,
         )
 
-    return MODEL_CREATORS[model_name](num_classes)
+    return model_creators[model_name](num_classes)
 
 
 def get_aggregator(method: str, args: argparse.Namespace) -> Any:
     """Get aggregator based on method name."""
+    ensure_runtime_imports()
     config = {
         "device": args.device,
         "use_data_size_weighting": True,
@@ -423,12 +440,13 @@ def get_aggregator(method: str, args: argparse.Namespace) -> Any:
         config["use_pi_weighting"] = args.use_pi_weighting
         config["server_lr"] = args.server_lr
     
-    return AGGREGATOR_CREATORS[method](config)
+    return RUNTIME["AGGREGATOR_CREATORS"][method](config)
 
 
-def create_trainer_config(args: argparse.Namespace) -> TrainerConfig:
+def create_trainer_config(args: argparse.Namespace):
     """Create trainer configuration from arguments."""
-    return TrainerConfig(
+    ensure_runtime_imports()
+    return RUNTIME["TrainerConfig"](
         num_rounds=args.num_rounds,
         num_clients_per_round=args.clients_per_round,
         local_epochs=args.local_epochs,
@@ -464,7 +482,8 @@ def create_trainer_config(args: argparse.Namespace) -> TrainerConfig:
 
 def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
     """Run the federated learning experiment."""
-    set_seed(args.seed)
+    ensure_runtime_imports()
+    RUNTIME["set_seed"](args.seed)
     
     output_base = Path(args.output_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -527,7 +546,7 @@ def run_experiment(args: argparse.Namespace) -> Dict[str, Any]:
         trainer_config.checkpoint_dir = str(output_dir / checkpoint_dir)
     
     logger.info("Initializing trainer...")
-    trainer = FederatedTrainer(
+    trainer = RUNTIME["FederatedTrainer"](
         model=model,
         aggregator=aggregator,
         client_loaders=client_loaders,
@@ -577,6 +596,8 @@ def main():
         logger.info(f"Applied {applied} config entries from {args.config}")
 
     resolve_dataset_defaults(args)
+    ensure_runtime_imports()
+    torch = RUNTIME["torch"]
     
     if not torch.cuda.is_available() and args.device == "cuda":
         logger.warning("CUDA not available, using CPU")

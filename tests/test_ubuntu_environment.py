@@ -33,15 +33,15 @@ class TestResult:
     
     def add_pass(self, name: str, message: str = ""):
         self.passed.append((name, message))
-        print(f"  ✅ {name}" + (f" - {message}" if message else ""))
+        print(f"  [PASS] {name}" + (f" - {message}" if message else ""))
     
     def add_fail(self, name: str, message: str = ""):
         self.failed.append((name, message))
-        print(f"  ❌ {name}" + (f" - {message}" if message else ""))
+        print(f"  [FAIL] {name}" + (f" - {message}" if message else ""))
     
     def add_warning(self, name: str, message: str = ""):
         self.warnings.append((name, message))
-        print(f"  ⚠️  {name}" + (f" - {message}" if message else ""))
+        print(f"  [WARN] {name}" + (f" - {message}" if message else ""))
     
     def summary(self):
         total = len(self.passed) + len(self.failed)
@@ -85,7 +85,7 @@ def test_python_environment(result: TestResult):
     """测试Python环境"""
     print("\n[2] Python环境测试")
     
-    required_version = (3, 8)
+    required_version = (3, 10)
     current_version = sys.version_info[:2]
     
     if current_version >= required_version:
@@ -246,7 +246,8 @@ def test_file_permissions(result: TestResult):
     
     scripts = [
         "scripts/run_experiment.py",
-        "scripts/run_all_experiments.py",
+        "scripts/run_five_stages.py",
+        "scripts/analyze_results.py",
     ]
     
     for script in scripts:

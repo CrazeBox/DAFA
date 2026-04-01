@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader, Subset
 from typing import Dict, List, Optional, Tuple, Callable
 from pathlib import Path
-import urllib.request
+from .download_utils import download_url_with_progress
 
 
 SHAKESPEARE_URL = "https://raw.githubusercontent.com/tao-shen/FEMNIST_pytorch/master/data/shakespeare/"
@@ -81,7 +81,7 @@ class ShakespeareDataset(Dataset):
             if not all_data_path.exists():
                 url = f"{SHAKESPEARE_URL}{split}/all_data.json"
                 try:
-                    urllib.request.urlretrieve(url, all_data_path)
+                    download_url_with_progress(url, all_data_path)
                     print(f"Downloaded {split} data")
                 except Exception as e:
                     if self.allow_synthetic_data:

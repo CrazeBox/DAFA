@@ -1,200 +1,160 @@
 # DAFA: Directionally Aligned Federated Aggregation
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/pytorch-2.0+-orange.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+PyTorch implementation of DAFA for federated learning under heterogeneous data distributions.
 
-PyTorch implementation of **DAFA (Directionally Aligned Federated Aggregation)** for federated learning with non-IID data.
+## Main entrypoints
 
-The experiment entrypoints are aligned with the paper defaults:
-- `CIFAR-10`: `ResNet-18`, 100 clients, 10 sampled, `K=5`, batch size `32`, `T=200`
-- `FEMNIST`: `TwoLayerCNN`, 200 sampled clients, `K=10`, batch size `32`, `T=200`
-- `Shakespeare`: 2-layer `LSTM`, `hidden=256`, `embedding=200`, 100 sampled clients, `K=2`, batch size `32`, `T=200`
+The repository exposes one canonical path per task:
+
+- `scripts/run_experiment.py`: run a single experiment
+- `scripts/run_five_stages.py`: run the staged paper pipeline
+- `scripts/download_datasets.py`: download datasets with progress bars
+- `scripts/analyze_results.py`: summarize runs, compare runs, and generate plots
 
 ## Quick Start
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/your-username/DAFA.git
 cd DAFA
 
-# 2. Run setup (creates venv, installs dependencies, verifies GPU)
 bash scripts/setup_env.sh --profile basic
+source venv/bin/activate
 
-# 3. Run quick test (10 rounds, ~2 minutes)
+python scripts/download_datasets.py --datasets cifar10,femnist,shakespeare
+
 bash scripts/run_quick.sh
+```
 
-# 4. Run full experiment
-bash scripts/run_experiment.sh
+## Single Experiment
 
-# 5. Run full study pipeline
+```bash
+python scripts/run_experiment.py \
+  --method dafa \
+  --dataset cifar10 \
+  --alpha 0.1 \
+  --device cuda
+```
+
+## Staged Pipeline
+
+Run the paper-style staged pipeline:
+
+```bash
+python scripts/run_five_stages.py \
+  --stages all \
+  --device cuda \
+  --num_rounds 200 \
+  --seeds 42,123,456,777,1024
+```
+
+Stage 1 only:
+
+```bash
+python scripts/run_five_stages.py \
+  --stages 1 \
+  --device cuda \
+  --num_rounds 100 \
+  --seeds 42,123,456
+```
+
+Optional shell wrapper:
+
+```bash
 bash scripts/study_pipeline.sh results/study_pipeline cuda 42,123,456 100
 ```
 
-## Requirements
+## Result Summaries and Plots
 
-- Python 3.8+
-- CUDA-capable GPU (recommended) or CPU
-- 4GB+ GPU memory for basic experiments
-
-## Installation
-
-### Option 1: Automatic Setup (Recommended)
+Build summarized run tables:
 
 ```bash
-bash scripts/setup_env.sh --profile basic
+python scripts/analyze_results.py select-best \
+  --results_root results \
+  --output_dir results/summary
 ```
 
-### Option 2: Manual Setup
+Generate plots:
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Verify installation
-python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+python scripts/analyze_results.py plot \
+  --best_runs results/summary/best_runs.json \
+  --output_dir results/summary/plots \
+  --format pdf
 ```
 
-## Usage
-
-### Basic Experiment
+Compare multiple finished runs directly:
 
 ```bash
-# Activate environment
-source venv/bin/activate
-
-# Run single experiment
-python scripts/run_experiment.py \
-    --method dafa \
-    --dataset cifar10 \
-    --num_rounds 100 \
-    --device cuda
+python scripts/analyze_results.py compare \
+  --inputs results/run_a results/run_b results/run_c \
+  --output_dir results/compare_ablation \
+  --format png
 ```
 
-### Hyperparameter Tuning (Phase 1)
+## Datasets
+
+Supported datasets:
+
+- `CIFAR-10`
+- `FEMNIST`
+- `Shakespeare`
+
+Use the built-in downloader:
 
 ```bash
-# Run full tuning (8 methods, ~2 days on RTX 3050)
-python scripts/run_phase1_tuning.py \
-    --dataset cifar10 \
-    --alpha 0.1 \
-    --num_rounds 100
-
-# Quick tuning (faster)
-python scripts/run_phase1_tuning.py \
-    --dataset cifar10 \
-    --alpha 0.1 \
-    --num_rounds 20 \
-    --num_repeats 2
+python scripts/download_datasets.py --datasets cifar10,femnist,shakespeare
 ```
 
-### GPU Memory Configuration
+If the public mirror for `FEMNIST/Shakespeare` changes, override it:
 
-| GPU Memory | Recommended Settings |
-|------------|---------------------|
-| ≥12GB | `--num_parallel_clients 4 --num_workers 0` |
-| 8-12GB | `--num_parallel_clients 2 --num_workers 2` |
-| 4-8GB | `--num_parallel_clients 1 --num_workers 4` (default) |
-| <4GB | Use CPU: `--device cpu` |
-
-## Supported Methods
-
-| Method | Description |
-|--------|-------------|
-| `fedavg` | Federated Averaging (McMahan et al., 2017) |
-| `fedprox` | Federated Proximal (Li et al., 2020) |
-| `scaffold` | SCAFFOLD (Karimireddy et al., 2020) |
-| `fednova` | FedNova (Wang et al., 2020) |
-| `fedavgm` | FedAvg with server momentum |
-| `fedadam` | FedAdam (Reddi et al., 2020) |
-| `dafa` | Direction-Aware Federated Averaging (Ours) |
-| `dir_weight` | Direction-based Weighting |
-
-## Supported Datasets
-
-| Dataset | Classes | Default Clients |
-|---------|---------|-----------------|
-| CIFAR-10 | 10 | 100 |
-| FEMNIST | 62 | 100 |
-| Shakespeare | 80 | 100 |
-
-## Project Structure
-
-```
-DAFA/
-├── scripts/           # Experiment scripts
-│   ├── setup_env.sh   # Unified environment setup
-│   ├── run_quick.sh   # Quick test
-│   ├── run_experiment.py
-│   ├── run_five_stages.py
-│   ├── extract_best_runs.py
-│   ├── plot_results.py
-│   ├── run_analysis.py
-│   └── study_pipeline.sh
-├── src/               # Source code
-│   ├── methods/       # Aggregation methods
-│   ├── models/        # Neural network models
-│   ├── data/          # Data loading utilities
-│   └── utils/         # Helper functions
-├── configs/           # Configuration files
-├── results/           # Experiment results (auto-generated)
-└── requirements.txt   # Dependencies
+```bash
+python scripts/download_datasets.py \
+  --datasets femnist,shakespeare \
+  --femnist_base_url <stable-femnist-mirror> \
+  --shakespeare_base_url <stable-shakespeare-mirror>
 ```
 
-## Results
+## Default paper settings
 
-After running experiments, results are saved to `results/`:
+- `CIFAR-10`: `ResNet-18`, 100 clients, 10 sampled, `K=5`, batch size `32`, `T=200`
+- `FEMNIST`: `TwoLayerCNN`, 200 clients, 20 sampled, `K=10`, batch size `32`, `T=200`
+- `Shakespeare`: 2-layer `LSTM`, `hidden=256`, `embedding=200`, 100 clients, 10 sampled, `K=2`, batch size `32`, `T=200`
 
-```
+## Project structure
+
+```text
+scripts/
+  setup_env.sh
+  run_quick.sh
+  run_experiment.py
+  run_five_stages.py
+  download_datasets.py
+  analyze_results.py
+  study_pipeline.sh
+
+src/
+  methods/
+  models/
+  data/
+  core/
+  analysis/
+  utils/
+
+docs/
+  REPRODUCTION_GUIDE.md
+
+configs/
 results/
-└── default/
-    └── cifar10_dafa_seed42_20240101_120000/
-        ├── results.json       # Final metrics
-        ├── metadata.json      # Run metadata
-        ├── config.json        # Experiment config
-        ├── experiment.log     # Training log
-        └── checkpoints/       # Model checkpoints
-            └── best_model.pt  # Best model weights
 ```
 
-Pipeline outputs:
+## Reproduction
 
-```
-results/study_pipeline/
-├── phase1/
-├── five_stages/
-│   ├── five_stages_summary.json
-│   └── pipeline_status.json
-└── summary/
-    ├── best_runs.json
-    ├── best_runs.csv
-    └── plots/
-```
+The main documentation is:
 
-## Citation
-
-If you find this code useful, please cite:
-
-```bibtex
-@inproceedings{dafa2024,
-  title={Direction-Aware Federated Averaging for Non-IID Data},
-  author={Your Name},
-  booktitle={Conference},
-  year={2024}
-}
-```
+- [EXPERIMENT_DESIGN.md](e:\AIProject\FedJD\DAFA\EXPERIMENT_DESIGN.md)
+- [REPRODUCTION_GUIDE.md](e:\AIProject\FedJD\DAFA\docs\REPRODUCTION_GUIDE.md)
+- [PROJECT_LAYOUT.md](e:\AIProject\FedJD\DAFA\docs\PROJECT_LAYOUT.md)
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- FedAvg: McMahan et al., "Communication-Efficient Learning of Deep Networks from Decentralized Data"
-- FedProx: Li et al., "Federated Optimization in Heterogeneous Networks"
-- SCAFFOLD: Karimireddy et al., "SCAFFOLD: Stochastic Controlled Averaging for Federated Learning"
+MIT. See [LICENSE](LICENSE).

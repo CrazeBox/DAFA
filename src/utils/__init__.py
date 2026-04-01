@@ -1,18 +1,5 @@
-"""Utility functions for DAFA experiment framework."""
+"""Utility package for DAFA.
 
-from .seed import set_seed, get_seed
-from .logger import setup_logger, get_logger
-from .metrics import compute_metrics, AverageMeter
-from .checkpoint import save_checkpoint, load_checkpoint, CheckpointManager
-
-__all__ = [
-    "set_seed",
-    "get_seed",
-    "setup_logger",
-    "get_logger",
-    "compute_metrics",
-    "AverageMeter",
-    "save_checkpoint",
-    "load_checkpoint",
-    "CheckpointManager",
-]
+Avoid importing heavy runtime dependencies at package import time.
+Import concrete helpers from submodules instead.
+"""

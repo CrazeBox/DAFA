@@ -9,4 +9,4 @@ if [ -z "$VIRTUAL_ENV" ] && [ -d "$PROJECT_DIR/venv" ]; then
     source "$PROJECT_DIR/venv/bin/activate"
 fi
 
-python scripts/run_all_experiments.py --experiment all "$@"
+python scripts/run_five_stages.py --stages all "$@"

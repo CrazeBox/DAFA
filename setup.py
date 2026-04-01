@@ -18,6 +18,8 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
         if line.strip() and not line.startswith("#")
     ]
 
+script_requirements = [req for req in requirements if not req.startswith("torch")]
+
 setup(
     name="dafa-fl",
     version="1.0.0",
@@ -34,14 +36,12 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    python_requires=">=3.8",
-    install_requires=requirements,
+    python_requires=">=3.10",
+    install_requires=script_requirements,
     extras_require={
         "dev": [
             "pytest>=7.0.0",
@@ -58,8 +58,9 @@ setup(
     entry_points={
         "console_scripts": [
             "dafa-run=scripts.run_experiment:main",
-            "dafa-batch=scripts.run_all_experiments:main",
-            "dafa-analyze=scripts.run_analysis:main",
+            "dafa-stages=scripts.run_five_stages:main",
+            "dafa-data=scripts.download_datasets:main",
+            "dafa-analyze=scripts.analyze_results:main",
         ],
     },
 )
